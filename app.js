@@ -1,22 +1,35 @@
 // Initialize empty memory state structure
 let db = { rooms: { "General Stuff": [] }, activeRoom: "General Stuff" };
 
-// Fetch data from high-capacity phone storage (IndexedDB)
-localforage.getItem('self_chat_db').then((savedData) => {
-    if (savedData) {
-        db = savedData;
+// Safe initialization function
+function initApp() {
+    if (typeof localforage === 'undefined') {
+        // Fallback if network is slow and library isn't ready yet
+        setTimeout(initApp, 100);
+        return;
     }
-    renderRooms(); 
-    renderMessages();
-}).catch(() => {
-    renderRooms(); 
-    renderMessages();
-});
+
+    // Fetch data from high-capacity phone storage (IndexedDB)
+    localforage.getItem('self_chat_db').then((savedData) => {
+        if (savedData) {
+            db = savedData;
+        }
+        renderRooms(); 
+        renderMessages();
+        attachEventListeners();
+    }).catch(() => {
+        renderRooms(); 
+        renderMessages();
+        attachEventListeners();
+    });
+}
 
 function saveData() { 
-    localforage.setItem('self_chat_db', db).catch((err) => {
-        alert("Database write error encountered: " + err);
-    });
+    if (typeof localforage !== 'undefined') {
+        localforage.setItem('self_chat_db', db).catch((err) => {
+            console.error("Database write error: " + err);
+        });
+    }
 }
 
 function renderRooms() {
@@ -78,61 +91,66 @@ function renderMessages() {
     container.scrollTop = container.scrollHeight;
 }
 
-const addRoomBtn = document.getElementById('add-room-btn');
-if (addRoomBtn) {
-    addRoomBtn.onclick = () => {
-        const name = prompt("Enter new chat category name:");
-        if(name && !db.rooms[name]) { 
-            db.rooms[name] = []; 
-            db.activeRoom = name; 
-            saveData(); 
-            renderRooms(); 
-            renderMessages(); 
-        }
-    };
-}
-
-const mediaInput = document.getElementById('media-input');
-const attachBtn = document.getElementById('attach-btn');
-if (attachBtn && mediaInput) {
-    attachBtn.onclick = () => mediaInput.click();
-    mediaInput.onchange = () => {
-        const file = mediaInput.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const mediaObj = {
-                type: 'media',
-                fileType: file.type,
-                data: e.target.result
-            };
-            if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-            db.rooms[db.activeRoom].push(mediaObj);
-            saveData();
-            renderMessages();
+function attachEventListeners() {
+    const addRoomBtn = document.getElementById('add-room-btn');
+    if (addRoomBtn) {
+        addRoomBtn.onclick = () => {
+            const name = prompt("Enter new chat category name:");
+            if(name && !db.rooms[name]) { 
+                db.rooms[name] = []; 
+                db.activeRoom = name; 
+                saveData(); 
+                renderRooms(); 
+                renderMessages(); 
+            }
         };
-        reader.readAsDataURL(file);
-        mediaInput.value = ''; 
-    };
+    }
+
+    const mediaInput = document.getElementById('media-input');
+    const attachBtn = document.getElementById('attach-btn');
+    if (attachBtn && mediaInput) {
+        attachBtn.onclick = () => mediaInput.click();
+        mediaInput.onchange = () => {
+            const file = mediaInput.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const mediaObj = {
+                    type: 'media',
+                    fileType: file.type,
+                    data: e.target.result
+                };
+                if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
+                db.rooms[db.activeRoom].push(mediaObj);
+                saveData();
+                renderMessages();
+            };
+            reader.readAsDataURL(file);
+            mediaInput.value = ''; 
+        };
+    }
+
+    const messageForm = document.getElementById('message-form');
+    if (messageForm) {
+        messageForm.onsubmit = (e) => {
+            e.preventDefault();
+            const input = document.getElementById('message-input');
+            if (!input) return;
+            const text = input.value.trim();
+            if(text && db.activeRoom) { 
+                if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
+                db.rooms[db.activeRoom].push(text); 
+                input.value = ''; 
+                saveData(); 
+                renderMessages(); 
+            }
+        };
+    }
 }
 
-const messageForm = document.getElementById('message-form');
-if (messageForm) {
-    messageForm.onsubmit = (e) => {
-        e.preventDefault();
-        const input = document.getElementById('message-input');
-        if (!input) return;
-        const text = input.value.trim();
-        if(text && db.activeRoom) { 
-            if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-            db.rooms[db.activeRoom].push(text); 
-            input.value = ''; 
-            saveData(); 
-            renderMessages(); 
-        }
-    };
-}
+// Start everything once the browser window finishes downloading elements
+window.onload = initApp;
 
 if ('serviceWorker' in navigator) { 
     navigator.serviceWorker.register('sw.js').catch(() => {}); 
