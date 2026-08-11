@@ -1,3 +1,4 @@
+cat << 'EOF' > index.html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -25,6 +26,10 @@
             </header>
             <div id="messages-container"></div>
             <form id="message-form">
+                <!-- Hidden file input for attachment -->
+                <input type="file" id="media-input" accept="image/*,video/*" style="display: none;">
+                <button type="button" id="attach-btn">📎</button>
+                
                 <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
                 <button type="submit">Send</button>
             </form>
@@ -33,3 +38,4 @@
     <script src="app.js"></script>
 </body>
 </html>
+EOF
