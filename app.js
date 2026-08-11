@@ -1,11 +1,22 @@
-let db = JSON.parse(localStorage.getItem('self_chat_db')) || { rooms: { "General Stuff": [] }, activeRoom: "General Stuff" };
+// Initialize empty memory state structure
+let db = { rooms: { "General Stuff": [] }, activeRoom: "General Stuff" };
+
+// Fetch data from high-capacity phone storage (IndexedDB)
+localforage.getItem('self_chat_db').then((savedData) => {
+    if (savedData) {
+        db = savedData;
+    }
+    renderRooms(); 
+    renderMessages();
+}).catch(() => {
+    renderRooms(); 
+    renderMessages();
+});
 
 function saveData() { 
-    try {
-        localStorage.setItem('self_chat_db', JSON.stringify(db)); 
-    } catch (e) {
-        alert("Storage Full! Local storage can only hold roughly 5MB of media before it cuts off.");
-    }
+    localforage.setItem('self_chat_db', db).catch((err) => {
+        alert("Database write error encountered: " + err);
+    });
 }
 
 function renderRooms() {
@@ -67,7 +78,6 @@ function renderMessages() {
     container.scrollTop = container.scrollHeight;
 }
 
-// Attach Event Listeners Safely
 const addRoomBtn = document.getElementById('add-room-btn');
 if (addRoomBtn) {
     addRoomBtn.onclick = () => {
@@ -123,14 +133,6 @@ if (messageForm) {
         }
     };
 }
-
-// Initial Kickstart
-document.addEventListener('DOMContentLoaded', () => {
-    renderRooms(); 
-    renderMessages();
-});
-renderRooms(); 
-renderMessages();
 
 if ('serviceWorker' in navigator) { 
     navigator.serviceWorker.register('sw.js').catch(() => {}); 
