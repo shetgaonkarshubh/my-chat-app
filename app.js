@@ -140,8 +140,20 @@ function loadSyncCredentials() {
 
 async function runGistSync(isSilent = false) {
     const statusEl = document.getElementById('sync-status');
-    const token = localStorage.getItem('gh_token');
-    let gistId = localStorage.getItem('gist_id');
+    
+    // Auto-grab current input values if present in the modal
+    const tokenInput = document.getElementById('gh-token-input');
+    const gistInput = document.getElementById('gist-id-input');
+    
+    if (tokenInput && tokenInput.value.trim()) {
+        localStorage.setItem('gh_token', tokenInput.value.trim());
+    }
+    if (gistInput && gistInput.value.trim()) {
+        localStorage.setItem('gist_id', gistInput.value.trim());
+    }
+
+    const token = (localStorage.getItem('gh_token') || '').trim();
+    let gistId = (localStorage.getItem('gist_id') || '').trim();
 
     if (!token) {
         if (statusEl && !isSilent) statusEl.textContent = "Error: Token missing. Save your GitHub Token first.";
@@ -154,9 +166,17 @@ async function runGistSync(isSilent = false) {
         // 1. Fetch Remote Gist Data if Gist ID exists (Cache-Busted for iOS Safari)
         if (gistId) {
             const res = await fetch(`https://api.github.com/gists/${gistId}?t=${Date.now()}`, {
-                headers: { 'Authorization': `token ${token}` },
+                headers: { 
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                },
                 cache: 'no-store'
             });
+
+            if (res.status === 401) {
+                throw new Error("401 Unauthorized (Check token permissions or paste token again)");
+            }
+
             if (res.ok) {
                 const data = await res.json();
                 const content = data.files['self_chat_db.json']?.content;
@@ -185,8 +205,9 @@ async function runGistSync(isSilent = false) {
         const pushRes = await fetch(url, {
             method: method,
             headers: { 
-                'Authorization': `token ${token}`,
-                'Content-Type': 'application/json'
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/vnd.github.v3+json'
             },
             body: JSON.stringify(payload)
         });
@@ -197,7 +218,6 @@ async function runGistSync(isSilent = false) {
         if (pushData.id) {
             gistId = pushData.id;
             localStorage.setItem('gist_id', gistId);
-            const gistInput = document.getElementById('gist-id-input');
             if (gistInput) gistInput.value = gistId;
         }
 
