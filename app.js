@@ -1,34 +1,25 @@
-// Initialize empty memory state structure
 let db = { rooms: { "General Stuff": [] }, activeRoom: "General Stuff" };
 
-// Safe initialization function
 function initApp() {
     if (typeof localforage === 'undefined') {
-        // Fallback if network is slow and library isn't ready yet
         setTimeout(initApp, 100);
         return;
     }
-
-    // Fetch data from high-capacity phone storage (IndexedDB)
     localforage.getItem('self_chat_db').then((savedData) => {
-        if (savedData) {
-            db = savedData;
-        }
+        if (savedData) db = savedData;
         renderRooms(); 
-        renderMessages();
+        renderMessages(); 
         attachEventListeners();
     }).catch(() => {
         renderRooms(); 
-        renderMessages();
+        renderMessages(); 
         attachEventListeners();
     });
 }
 
 function saveData() { 
     if (typeof localforage !== 'undefined') {
-        localforage.setItem('self_chat_db', db).catch((err) => {
-            console.error("Database write error: " + err);
-        });
+        localforage.setItem('self_chat_db', db).catch((err) => console.error(err));
     }
 }
 
@@ -45,6 +36,7 @@ function renderRooms() {
             saveData(); 
             renderRooms(); 
             renderMessages(); 
+            document.getElementById('app').classList.add('show-chat');
         };
         list.appendChild(li);
     });
@@ -55,33 +47,17 @@ function renderMessages() {
     const title = document.getElementById('current-room-title');
     if (!container || !title) return;
     container.innerHTML = '';
-    
-    if(!db.activeRoom) { 
-        title.textContent = "Select a room"; 
-        return; 
-    }
-    
+    if(!db.activeRoom) { title.textContent = "Select a room"; return; }
     title.textContent = db.activeRoom;
     const messages = db.rooms[db.activeRoom] || [];
-    
     messages.forEach(msg => {
         const div = document.createElement('div');
         div.classList.add('message', 'sent');
-        
         if (msg && typeof msg === 'object' && msg.type === 'media') {
             if (msg.fileType && msg.fileType.startsWith('image/')) {
-                const img = document.createElement('img');
-                img.src = msg.data;
-                img.style.maxWidth = '100%';
-                img.style.borderRadius = '4px';
-                div.appendChild(img);
+                const img = document.createElement('img'); img.src = msg.data; img.style.maxWidth = '100%'; img.style.borderRadius = '4px'; div.appendChild(img);
             } else if (msg.fileType && msg.fileType.startsWith('video/')) {
-                const video = document.createElement('video');
-                video.src = msg.data;
-                video.controls = true;
-                video.style.maxWidth = '100%';
-                video.style.borderRadius = '4px';
-                div.appendChild(video);
+                const video = document.createElement('video'); video.src = msg.data; video.controls = true; video.style.maxWidth = '100%'; video.style.borderRadius = '4px'; div.appendChild(video);
             }
         } else {
             div.textContent = typeof msg === 'object' ? JSON.stringify(msg) : msg;
@@ -92,42 +68,38 @@ function renderMessages() {
 }
 
 function attachEventListeners() {
-    const addRoomBtn = document.getElementById('add-room-btn');
-    if (addRoomBtn) {
-        addRoomBtn.onclick = () => {
-            const name = prompt("Enter new chat category name:");
-            if(name && !db.rooms[name]) { 
-                db.rooms[name] = []; 
-                db.activeRoom = name; 
-                saveData(); 
-                renderRooms(); 
-                renderMessages(); 
-            }
+    const backBtn = document.getElementById('back-btn');
+    if (backBtn) {
+        backBtn.onclick = () => {
+            document.getElementById('app').classList.remove('show-chat');
         };
     }
+
+    document.getElementById('add-room-btn').onclick = () => {
+        const name = prompt("Enter new chat category name:");
+        if(name && !db.rooms[name]) { 
+            db.rooms[name] = []; 
+            db.activeRoom = name; 
+            saveData(); 
+            renderRooms(); 
+            renderMessages(); 
+            document.getElementById('app').classList.add('show-chat');
+        }
+    };
 
     const mediaInput = document.getElementById('media-input');
     const attachBtn = document.getElementById('attach-btn');
     if (attachBtn && mediaInput) {
         attachBtn.onclick = () => mediaInput.click();
         mediaInput.onchange = () => {
-            const file = mediaInput.files[0];
-            if (!file) return;
-
+            const file = mediaInput.files[0]; if (!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
-                const mediaObj = {
-                    type: 'media',
-                    fileType: file.type,
-                    data: e.target.result
-                };
+                const mediaObj = { type: 'media', fileType: file.type, data: e.target.result };
                 if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-                db.rooms[db.activeRoom].push(mediaObj);
-                saveData();
-                renderMessages();
+                db.rooms[db.activeRoom].push(mediaObj); saveData(); renderMessages();
             };
-            reader.readAsDataURL(file);
-            mediaInput.value = ''; 
+            reader.readAsDataURL(file); mediaInput.value = '';
         };
     }
 
@@ -135,23 +107,15 @@ function attachEventListeners() {
     if (messageForm) {
         messageForm.onsubmit = (e) => {
             e.preventDefault();
-            const input = document.getElementById('message-input');
-            if (!input) return;
+            const input = document.getElementById('message-input'); if (!input) return;
             const text = input.value.trim();
-            if(text && db.activeRoom) { 
+            if(text && db.activeRoom) {
                 if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-                db.rooms[db.activeRoom].push(text); 
-                input.value = ''; 
-                saveData(); 
-                renderMessages(); 
+                db.rooms[db.activeRoom].push(text); input.value = ''; saveData(); renderMessages();
             }
         };
     }
 }
 
-// Start everything once the browser window finishes downloading elements
 window.onload = initApp;
-
-if ('serviceWorker' in navigator) { 
-    navigator.serviceWorker.register('sw.js').catch(() => {}); 
-}
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').catch(() => {}); }
