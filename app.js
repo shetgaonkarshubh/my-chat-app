@@ -23,6 +23,11 @@ function saveData() {
     }
 }
 
+function getCurrentTimeStr() {
+    const now = new Date();
+    return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
 function renderRooms() {
     const list = document.getElementById('room-list');
     if (!list) return;
@@ -49,19 +54,55 @@ function renderMessages() {
     container.innerHTML = '';
     if(!db.activeRoom) { title.textContent = "Select a room"; return; }
     title.textContent = db.activeRoom;
+    
     const messages = db.rooms[db.activeRoom] || [];
     messages.forEach(msg => {
         const div = document.createElement('div');
         div.classList.add('message', 'sent');
-        if (msg && typeof msg === 'object' && msg.type === 'media') {
-            if (msg.fileType && msg.fileType.startsWith('image/')) {
-                const img = document.createElement('img'); img.src = msg.data; img.style.maxWidth = '100%'; img.style.borderRadius = '4px'; div.appendChild(img);
-            } else if (msg.fileType && msg.fileType.startsWith('video/')) {
-                const video = document.createElement('video'); video.src = msg.data; video.controls = true; video.style.maxWidth = '100%'; video.style.borderRadius = '4px'; div.appendChild(video);
+
+        const contentDiv = document.createElement('div');
+        contentDiv.classList.add('message-content');
+
+        let timeText = '';
+
+        // Handle structured object messages (Media or Text with timestamp)
+        if (msg && typeof msg === 'object') {
+            timeText = msg.timestamp || '';
+            if (msg.type === 'media') {
+                if (msg.fileType && msg.fileType.startsWith('image/')) {
+                    const img = document.createElement('img'); 
+                    img.src = msg.data; 
+                    img.style.maxWidth = '100%'; 
+                    img.style.borderRadius = '4px'; 
+                    contentDiv.appendChild(img);
+                } else if (msg.fileType && msg.fileType.startsWith('video/')) {
+                    const video = document.createElement('video'); 
+                    video.src = msg.data; 
+                    video.controls = true; 
+                    video.style.maxWidth = '100%'; 
+                    video.style.borderRadius = '4px'; 
+                    contentDiv.appendChild(video);
+                }
+            } else if (msg.type === 'text') {
+                contentDiv.textContent = msg.text;
+            } else {
+                contentDiv.textContent = JSON.stringify(msg);
             }
         } else {
-            div.textContent = typeof msg === 'object' ? JSON.stringify(msg) : msg;
+            // Legacy plain string messages
+            contentDiv.textContent = msg;
         }
+
+        div.appendChild(contentDiv);
+
+        // Append timestamp if available
+        if (timeText) {
+            const timeSpan = document.createElement('span');
+            timeSpan.classList.add('message-time');
+            timeSpan.textContent = timeText;
+            div.appendChild(timeSpan);
+        }
+
         container.appendChild(div);
     });
     container.scrollTop = container.scrollHeight;
@@ -95,11 +136,19 @@ function attachEventListeners() {
             const file = mediaInput.files[0]; if (!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
-                const mediaObj = { type: 'media', fileType: file.type, data: e.target.result };
+                const mediaObj = { 
+                    type: 'media', 
+                    fileType: file.type, 
+                    data: e.target.result, 
+                    timestamp: getCurrentTimeStr() 
+                };
                 if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-                db.rooms[db.activeRoom].push(mediaObj); saveData(); renderMessages();
+                db.rooms[db.activeRoom].push(mediaObj); 
+                saveData(); 
+                renderMessages();
             };
-            reader.readAsDataURL(file); mediaInput.value = '';
+            reader.readAsDataURL(file); 
+            mediaInput.value = '';
         };
     }
 
@@ -110,8 +159,16 @@ function attachEventListeners() {
             const input = document.getElementById('message-input'); if (!input) return;
             const text = input.value.trim();
             if(text && db.activeRoom) {
+                const textObj = { 
+                    type: 'text', 
+                    text: text, 
+                    timestamp: getCurrentTimeStr() 
+                };
                 if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-                db.rooms[db.activeRoom].push(text); input.value = ''; saveData(); renderMessages();
+                db.rooms[db.activeRoom].push(textObj); 
+                input.value = ''; 
+                saveData(); 
+                renderMessages();
             }
         };
     }
