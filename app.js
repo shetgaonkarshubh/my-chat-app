@@ -226,7 +226,10 @@ async function runGistSync(isSilent = false) {
 
             if (res.ok) {
                 const data = await res.json();
-                const content = data.files['self_chat_db.json']?.content;
+                // Dynamically grab the first file regardless of filename
+                const fileKey = Object.keys(data.files || {})[0];
+                const content = fileKey ? data.files[fileKey]?.content : null;
+
                 if (content) {
                     const remoteDb = JSON.parse(content);
                     db = mergeDatabases(db, remoteDb);
