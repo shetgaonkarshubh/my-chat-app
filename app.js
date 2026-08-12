@@ -164,19 +164,28 @@ function mergeDatabases(local, remote) {
         const map = new Map();
 
         [...localMsgs, ...remoteMsgs].forEach(msg => {
-            if (typeof msg === 'object' && msg.id && deleted.has(msg.id)) {
-                return; // Ignore deleted messages
-            }
-            
-            const key = (typeof msg === 'object' && msg.id) ? msg.id : JSON.stringify(msg);
-            
-            if (map.has(key)) {
-                const existing = map.get(key);
-                if (typeof msg === 'object' && typeof existing === 'object' && msg.updatedAt && existing.updatedAt) {
-                    if (msg.updatedAt > existing.updatedAt) map.set(key, msg);
-                }
+            if (!msg) return;
+
+            // Ensure msg is formatted as an object with an ID
+            let msgObj = typeof msg === 'object' ? { ...msg } : { type: 'text', text: String(msg), timestamp: '' };
+            if (!msgObj.id) msgObj.id = generateId();
+
+            // Ignore deleted messages
+            if (deleted.has(msgObj.id)) return;
+
+            // Content-based unique key to prevent cross-device duplicates
+            const contentKey = msgObj.type === 'media' 
+                ? `media_${msgObj.fileType}_${(msgObj.data || '').length}_${msgObj.timestamp || ''}` 
+                : `text_${msgObj.text || ''}_${msgObj.timestamp || ''}`;
+
+            if (!map.has(contentKey)) {
+                map.set(contentKey, msgObj);
             } else {
-                map.set(key, msg);
+                // If the message already exists, keep the edited/updated version
+                const existing = map.get(contentKey);
+                if (msgObj.updatedAt && existing.updatedAt && msgObj.updatedAt > existing.updatedAt) {
+                    map.set(contentKey, msgObj);
+                }
             }
         });
         
