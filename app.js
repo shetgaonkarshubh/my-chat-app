@@ -1,4 +1,5 @@
 let db = { rooms: { "General Stuff": [] }, activeRoom: "General Stuff" };
+let autoSyncInterval = null;
 
 function initApp() {
     if (typeof localforage === 'undefined') {
@@ -11,11 +12,13 @@ function initApp() {
         renderMessages(); 
         attachEventListeners();
         loadSyncCredentials();
+        startAutoSync(); // Start background sync timer
     }).catch(() => {
         renderRooms(); 
         renderMessages(); 
         attachEventListeners();
         loadSyncCredentials();
+        startAutoSync(); // Start background sync timer
     });
 }
 
@@ -135,17 +138,17 @@ function loadSyncCredentials() {
     if (gistInput) gistInput.value = gistId;
 }
 
-async function runGistSync() {
+async function runGistSync(isSilent = false) {
     const statusEl = document.getElementById('sync-status');
     const token = localStorage.getItem('gh_token');
     let gistId = localStorage.getItem('gist_id');
 
     if (!token) {
-        if (statusEl) statusEl.textContent = "Error: Token missing. Save your GitHub Token first.";
+        if (statusEl && !isSilent) statusEl.textContent = "Error: Token missing. Save your GitHub Token first.";
         return;
     }
 
-    if (statusEl) statusEl.textContent = "Syncing with GitHub...";
+    if (statusEl && !isSilent) statusEl.textContent = "Syncing with GitHub...";
 
     try {
         // 1. Fetch Remote Gist Data if Gist ID exists
@@ -200,8 +203,27 @@ async function runGistSync() {
         if (statusEl) statusEl.textContent = `Sync successful! (${getCurrentTimeStr()})`;
     } catch (err) {
         console.error(err);
-        if (statusEl) statusEl.textContent = `Sync failed: ${err.message}`;
+        if (statusEl && !isSilent) statusEl.textContent = `Sync failed: ${err.message}`;
     }
+}
+
+// Automatically syncs in the background every 5 minutes and on app focus
+function startAutoSync() {
+    // Initial sync on app load (silent)
+    runGistSync(true);
+
+    // Sync when user re-opens the app/tab
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            runGistSync(true);
+        }
+    });
+
+    // Background interval: every 5 minutes (300,000 ms)
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
+    autoSyncInterval = setInterval(() => {
+        runGistSync(true);
+    }, 300000);
 }
 
 function attachEventListeners() {
@@ -221,9 +243,10 @@ function attachEventListeners() {
         localStorage.setItem('gh_token', token);
         localStorage.setItem('gist_id', gistId);
         document.getElementById('sync-status').textContent = "Credentials saved locally!";
+        runGistSync(false);
     };
 
-    document.getElementById('run-sync-btn').onclick = runGistSync;
+    document.getElementById('run-sync-btn').onclick = () => runGistSync(false);
 
     document.getElementById('add-room-btn').onclick = () => {
         const name = prompt("Enter new chat category name:");
@@ -255,6 +278,7 @@ function attachEventListeners() {
                 db.rooms[db.activeRoom].push(mediaObj); 
                 saveData(); 
                 renderMessages();
+                runGistSync(true); // Trigger sync after uploading media
             };
             reader.readAsDataURL(file); 
             mediaInput.value = '';
@@ -278,6 +302,7 @@ function attachEventListeners() {
                 input.value = ''; 
                 saveData(); 
                 renderMessages();
+                runGistSync(true); // Trigger sync after sending text
             }
         };
     }
