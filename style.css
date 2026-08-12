@@ -21,6 +21,13 @@ body, html, #app { height: 100%; display: flex; overflow: hidden; background-col
 .message-content { margin-bottom: 2px; }
 .message-time { font-size: 11px; color: #667781; align-self: flex-end; margin-top: 2px; user-select: none; }
 
+#action-modal .modal-content {
+    text-align: center;
+}
+.action-btn-danger {
+    background: #ea4335 !important;
+}
+
 #message-form { background: #f0f2f5; padding: 10px; display: flex; align-items: center; gap: 10px; }
 #attach-btn { background: none; border: none; font-size: 22px; cursor: pointer; padding: 5px; color: #54656f; display: block !important; }
 #message-input { flex: 1; padding: 10px; border: none; border-radius: 8px; outline: none; font-size: 16px; }

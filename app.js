@@ -1,5 +1,9 @@
-let db = { rooms: { "General Stuff": [] }, activeRoom: "General Stuff" };
+let db = { rooms: { "General Stuff": [] }, activeRoom: "General Stuff", deleted: [] };
 let autoSyncInterval = null;
+
+function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
 
 function initApp() {
     if (typeof localforage === 'undefined') {
@@ -8,17 +12,18 @@ function initApp() {
     }
     localforage.getItem('self_chat_db').then((savedData) => {
         if (savedData) db = savedData;
+        if (!db.deleted) db.deleted = [];
         renderRooms(); 
         renderMessages(); 
         attachEventListeners();
         loadSyncCredentials();
-        startAutoSync(); // Start background sync timer
+        startAutoSync();
     }).catch(() => {
         renderRooms(); 
         renderMessages(); 
         attachEventListeners();
         loadSyncCredentials();
-        startAutoSync(); // Start background sync timer
+        startAutoSync();
     });
 }
 
@@ -61,38 +66,40 @@ function renderMessages() {
     title.textContent = db.activeRoom;
     
     const messages = db.rooms[db.activeRoom] || [];
-    messages.forEach(msg => {
+    messages.forEach((msg, index) => {
+        // Upgrade legacy messages to object structure with IDs
+        if (typeof msg !== 'object') {
+            msg = { id: generateId(), type: 'text', text: String(msg), timestamp: '' };
+            db.rooms[db.activeRoom][index] = msg;
+        } else if (!msg.id) {
+            msg.id = generateId();
+            db.rooms[db.activeRoom][index] = msg;
+        }
+
         const div = document.createElement('div');
         div.classList.add('message', 'sent');
 
         const contentDiv = document.createElement('div');
         contentDiv.classList.add('message-content');
-        let timeText = '';
+        let timeText = msg.timestamp || '';
 
-        if (msg && typeof msg === 'object') {
-            timeText = msg.timestamp || '';
-            if (msg.type === 'media') {
-                if (msg.fileType && msg.fileType.startsWith('image/')) {
-                    const img = document.createElement('img'); 
-                    img.src = msg.data; 
-                    img.style.maxWidth = '100%'; 
-                    img.style.borderRadius = '4px'; 
-                    contentDiv.appendChild(img);
-                } else if (msg.fileType && msg.fileType.startsWith('video/')) {
-                    const video = document.createElement('video'); 
-                    video.src = msg.data; 
-                    video.controls = true; 
-                    video.style.maxWidth = '100%'; 
-                    video.style.borderRadius = '4px'; 
-                    contentDiv.appendChild(video);
-                }
-            } else if (msg.type === 'text') {
-                contentDiv.textContent = msg.text;
-            } else {
-                contentDiv.textContent = JSON.stringify(msg);
+        if (msg.type === 'media') {
+            if (msg.fileType && msg.fileType.startsWith('image/')) {
+                const img = document.createElement('img'); 
+                img.src = msg.data; 
+                img.style.maxWidth = '100%'; 
+                img.style.borderRadius = '4px'; 
+                contentDiv.appendChild(img);
+            } else if (msg.fileType && msg.fileType.startsWith('video/')) {
+                const video = document.createElement('video'); 
+                video.src = msg.data; 
+                video.controls = true; 
+                video.style.maxWidth = '100%'; 
+                video.style.borderRadius = '4px'; 
+                contentDiv.appendChild(video);
             }
         } else {
-            contentDiv.textContent = msg;
+            contentDiv.textContent = msg.text || '';
         }
 
         div.appendChild(contentDiv);
@@ -100,28 +107,77 @@ function renderMessages() {
         if (timeText) {
             const timeSpan = document.createElement('span');
             timeSpan.classList.add('message-time');
-            timeSpan.textContent = timeText;
+            timeSpan.textContent = timeText + (msg.edited ? " (edited)" : "");
             div.appendChild(timeSpan);
         }
+
+        // Tap/Click to Edit or Delete
+        div.onclick = () => openMessageActionMenu(index, msg);
 
         container.appendChild(div);
     });
     container.scrollTop = container.scrollHeight;
 }
 
-// Merge Local and Remote DB without dropping unique messages
+function openMessageActionMenu(index, msg) {
+    const choices = msg.type === 'media' ? ["Delete Media", "Cancel"] : ["Edit Message", "Delete Message", "Cancel"];
+    const action = prompt(`Message Options:\n1: ${choices[0]}\n${choices[1] ? '2: ' + choices[1] : ''}\n${choices[2] ? '3: ' + choices[2] : ''}\n\nEnter option number:`);
+
+    if (msg.type === 'text' && action === '1') {
+        // Edit Message
+        const newText = prompt("Edit your message:", msg.text);
+        if (newText !== null && newText.trim() !== '') {
+            msg.text = newText.trim();
+            msg.edited = true;
+            msg.updatedAt = Date.now();
+            saveData();
+            renderMessages();
+            runGistSync(true);
+        }
+    } else if ((msg.type === 'text' && action === '2') || (msg.type === 'media' && action === '1')) {
+        // Delete Message
+        if (confirm("Are you sure you want to delete this message?")) {
+            if (!db.deleted) db.deleted = [];
+            db.deleted.push(msg.id);
+            db.rooms[db.activeRoom].splice(index, 1);
+            saveData();
+            renderMessages();
+            runGistSync(true);
+        }
+    }
+}
+
+// Smart Merge taking tombstones & edited timestamps into account
 function mergeDatabases(local, remote) {
-    const merged = { rooms: {}, activeRoom: local.activeRoom || remote.activeRoom || "General Stuff" };
+    const deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
+    const merged = { 
+        rooms: {}, 
+        activeRoom: local.activeRoom || remote.activeRoom || "General Stuff",
+        deleted: Array.from(deleted)
+    };
+    
     const allRooms = new Set([...Object.keys(local.rooms || {}), ...Object.keys(remote.rooms || {})]);
     
     allRooms.forEach(room => {
         const localMsgs = local.rooms[room] || [];
         const remoteMsgs = remote.rooms[room] || [];
-        
         const map = new Map();
+
         [...localMsgs, ...remoteMsgs].forEach(msg => {
-            const key = typeof msg === 'object' ? JSON.stringify(msg) : String(msg);
-            map.set(key, msg);
+            if (typeof msg === 'object' && msg.id && deleted.has(msg.id)) {
+                return; // Ignore deleted messages
+            }
+            
+            const key = (typeof msg === 'object' && msg.id) ? msg.id : JSON.stringify(msg);
+            
+            if (map.has(key)) {
+                const existing = map.get(key);
+                if (typeof msg === 'object' && typeof existing === 'object' && msg.updatedAt && existing.updatedAt) {
+                    if (msg.updatedAt > existing.updatedAt) map.set(key, msg);
+                }
+            } else {
+                map.set(key, msg);
+            }
         });
         
         merged.rooms[room] = Array.from(map.values());
@@ -140,17 +196,11 @@ function loadSyncCredentials() {
 
 async function runGistSync(isSilent = false) {
     const statusEl = document.getElementById('sync-status');
-    
-    // Auto-grab current input values if present in the modal
     const tokenInput = document.getElementById('gh-token-input');
     const gistInput = document.getElementById('gist-id-input');
     
-    if (tokenInput && tokenInput.value.trim()) {
-        localStorage.setItem('gh_token', tokenInput.value.trim());
-    }
-    if (gistInput && gistInput.value.trim()) {
-        localStorage.setItem('gist_id', gistInput.value.trim());
-    }
+    if (tokenInput && tokenInput.value.trim()) localStorage.setItem('gh_token', tokenInput.value.trim());
+    if (gistInput && gistInput.value.trim()) localStorage.setItem('gist_id', gistInput.value.trim());
 
     const token = (localStorage.getItem('gh_token') || '').trim();
     let gistId = (localStorage.getItem('gist_id') || '').trim();
@@ -163,7 +213,6 @@ async function runGistSync(isSilent = false) {
     if (statusEl && !isSilent) statusEl.textContent = "Syncing with GitHub...";
 
     try {
-        // 1. Fetch Remote Gist Data if Gist ID exists (Cache-Busted for iOS Safari)
         if (gistId) {
             const res = await fetch(`https://api.github.com/gists/${gistId}?t=${Date.now()}`, {
                 headers: { 
@@ -173,9 +222,7 @@ async function runGistSync(isSilent = false) {
                 cache: 'no-store'
             });
 
-            if (res.status === 401) {
-                throw new Error("401 Unauthorized (Check token permissions or paste token again)");
-            }
+            if (res.status === 401) throw new Error("401 Unauthorized (Check token permissions)");
 
             if (res.ok) {
                 const data = await res.json();
@@ -190,13 +237,10 @@ async function runGistSync(isSilent = false) {
             }
         }
 
-        // 2. Upload Merged Data Back to Gist
         const payload = {
             description: "Self Chat Backup DB",
             public: false,
-            files: {
-                "self_chat_db.json": { content: JSON.stringify(db) }
-            }
+            files: { "self_chat_db.json": { content: JSON.stringify(db) } }
         };
 
         const method = gistId ? 'PATCH' : 'POST';
@@ -228,32 +272,19 @@ async function runGistSync(isSilent = false) {
     }
 }
 
-// Automatically syncs in the background every 5 minutes and on app focus
 function startAutoSync() {
-    // Initial sync on app load (silent)
     runGistSync(true);
-
-    // Sync when user re-opens the app/tab
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            runGistSync(true);
-        }
+        if (document.visibilityState === 'visible') runGistSync(true);
     });
-
-    // Background interval: every 5 minutes (300,000 ms)
     if (autoSyncInterval) clearInterval(autoSyncInterval);
-    autoSyncInterval = setInterval(() => {
-        runGistSync(true);
-    }, 300000);
+    autoSyncInterval = setInterval(() => runGistSync(true), 300000);
 }
 
 function attachEventListeners() {
     const backBtn = document.getElementById('back-btn');
-    if (backBtn) {
-        backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
-    }
+    if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
 
-    // Modal listeners
     const modal = document.getElementById('sync-modal');
     document.getElementById('sync-settings-btn').onclick = () => modal.classList.remove('hidden');
     document.getElementById('close-modal-btn').onclick = () => modal.classList.add('hidden');
@@ -290,16 +321,18 @@ function attachEventListeners() {
             const reader = new FileReader();
             reader.onload = (e) => {
                 const mediaObj = { 
+                    id: generateId(),
                     type: 'media', 
                     fileType: file.type, 
                     data: e.target.result, 
-                    timestamp: getCurrentTimeStr() 
+                    timestamp: getCurrentTimeStr(),
+                    updatedAt: Date.now()
                 };
                 if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
                 db.rooms[db.activeRoom].push(mediaObj); 
                 saveData(); 
                 renderMessages();
-                runGistSync(true); // Trigger sync after uploading media
+                runGistSync(true);
             };
             reader.readAsDataURL(file); 
             mediaInput.value = '';
@@ -314,16 +347,18 @@ function attachEventListeners() {
             const text = input.value.trim();
             if(text && db.activeRoom) {
                 const textObj = { 
+                    id: generateId(),
                     type: 'text', 
                     text: text, 
-                    timestamp: getCurrentTimeStr() 
+                    timestamp: getCurrentTimeStr(),
+                    updatedAt: Date.now()
                 };
                 if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
                 db.rooms[db.activeRoom].push(textObj); 
                 input.value = ''; 
                 saveData(); 
                 renderMessages();
-                runGistSync(true); // Trigger sync after sending text
+                runGistSync(true);
             }
         };
     }
