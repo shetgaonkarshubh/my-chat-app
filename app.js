@@ -10,10 +10,12 @@ function initApp() {
         renderRooms(); 
         renderMessages(); 
         attachEventListeners();
+        loadSyncCredentials();
     }).catch(() => {
         renderRooms(); 
         renderMessages(); 
         attachEventListeners();
+        loadSyncCredentials();
     });
 }
 
@@ -62,10 +64,8 @@ function renderMessages() {
 
         const contentDiv = document.createElement('div');
         contentDiv.classList.add('message-content');
-
         let timeText = '';
 
-        // Handle structured object messages (Media or Text with timestamp)
         if (msg && typeof msg === 'object') {
             timeText = msg.timestamp || '';
             if (msg.type === 'media') {
@@ -89,13 +89,11 @@ function renderMessages() {
                 contentDiv.textContent = JSON.stringify(msg);
             }
         } else {
-            // Legacy plain string messages
             contentDiv.textContent = msg;
         }
 
         div.appendChild(contentDiv);
 
-        // Append timestamp if available
         if (timeText) {
             const timeSpan = document.createElement('span');
             timeSpan.classList.add('message-time');
@@ -108,13 +106,124 @@ function renderMessages() {
     container.scrollTop = container.scrollHeight;
 }
 
+// Merge Local and Remote DB without dropping unique messages
+function mergeDatabases(local, remote) {
+    const merged = { rooms: {}, activeRoom: local.activeRoom || remote.activeRoom || "General Stuff" };
+    const allRooms = new Set([...Object.keys(local.rooms || {}), ...Object.keys(remote.rooms || {})]);
+    
+    allRooms.forEach(room => {
+        const localMsgs = local.rooms[room] || [];
+        const remoteMsgs = remote.rooms[room] || [];
+        
+        const map = new Map();
+        [...localMsgs, ...remoteMsgs].forEach(msg => {
+            const key = typeof msg === 'object' ? JSON.stringify(msg) : String(msg);
+            map.set(key, msg);
+        });
+        
+        merged.rooms[room] = Array.from(map.values());
+    });
+    return merged;
+}
+
+function loadSyncCredentials() {
+    const token = localStorage.getItem('gh_token') || '';
+    const gistId = localStorage.getItem('gist_id') || '';
+    const tokenInput = document.getElementById('gh-token-input');
+    const gistInput = document.getElementById('gist-id-input');
+    if (tokenInput) tokenInput.value = token;
+    if (gistInput) gistInput.value = gistId;
+}
+
+async function runGistSync() {
+    const statusEl = document.getElementById('sync-status');
+    const token = localStorage.getItem('gh_token');
+    let gistId = localStorage.getItem('gist_id');
+
+    if (!token) {
+        if (statusEl) statusEl.textContent = "Error: Token missing. Save your GitHub Token first.";
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = "Syncing with GitHub...";
+
+    try {
+        // 1. Fetch Remote Gist Data if Gist ID exists
+        if (gistId) {
+            const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+                headers: { 'Authorization': `token ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const content = data.files['self_chat_db.json']?.content;
+                if (content) {
+                    const remoteDb = JSON.parse(content);
+                    db = mergeDatabases(db, remoteDb);
+                    saveData();
+                    renderRooms();
+                    renderMessages();
+                }
+            }
+        }
+
+        // 2. Upload Merged Data Back to Gist
+        const payload = {
+            description: "Self Chat Backup DB",
+            public: false,
+            files: {
+                "self_chat_db.json": { content: JSON.stringify(db) }
+            }
+        };
+
+        const method = gistId ? 'PATCH' : 'POST';
+        const url = gistId ? `https://api.github.com/gists/${gistId}` : `https://api.github.com/gists`;
+
+        const pushRes = await fetch(url, {
+            method: method,
+            headers: { 
+                'Authorization': `token ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!pushRes.ok) throw new Error(`HTTP error! status: ${pushRes.status}`);
+        
+        const pushData = await pushRes.json();
+        if (pushData.id) {
+            gistId = pushData.id;
+            localStorage.setItem('gist_id', gistId);
+            const gistInput = document.getElementById('gist-id-input');
+            if (gistInput) gistInput.value = gistId;
+        }
+
+        if (statusEl) statusEl.textContent = `Sync successful! (${getCurrentTimeStr()})`;
+    } catch (err) {
+        console.error(err);
+        if (statusEl) statusEl.textContent = `Sync failed: ${err.message}`;
+    }
+}
+
 function attachEventListeners() {
     const backBtn = document.getElementById('back-btn');
     if (backBtn) {
-        backBtn.onclick = () => {
-            document.getElementById('app').classList.remove('show-chat');
-        };
+        backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
     }
+
+    // Modal listeners
+    const modal = document.getElementById('sync-modal');
+    document.getElementById('sync-settings-btn').onclick = () => modal.classList.remove('hidden');
+    document.getElementById('close-modal-btn').onclick = () => modal.classList.add('hidden');
+
+    document.getElementById('save-sync-btn').onclick = () => {
+        const token = document.getElementById('gh-token-input').value.trim();
+        const gistId = document.getElementById('gist-id-input').value.trim();
+        localStorage.setItem('gh_token', token);
+        localStorage.setItem('gist_id', gistId);
+        document.getElementById('sync-status').textContent = "Credentials saved locally!";
+    };
+
+    document.getElementById('run-sync-btn').onclick = runGistSync;
 
     document.getElementById('add-room-btn').onclick = () => {
         const name = prompt("Enter new chat category name:");

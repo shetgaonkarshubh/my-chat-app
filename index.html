@@ -15,7 +15,10 @@
         <aside id="sidebar">
             <header>
                 <h2>My Chats</h2>
-                <button id="add-room-btn">+</button>
+                <div class="header-actions">
+                    <button id="sync-settings-btn" title="Sync Settings">⚙️</button>
+                    <button id="add-room-btn">+</button>
+                </div>
             </header>
             <ul id="room-list"></ul>
         </aside>
@@ -33,6 +36,26 @@
             </form>
         </main>
     </div>
+
+    <!-- Sync Settings Modal -->
+    <div id="sync-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>GitHub Gist Sync</h3>
+            <label for="gh-token-input">GitHub Token:</label>
+            <input type="password" id="gh-token-input" placeholder="ghp_xxxxxxxxxxxx">
+            
+            <label for="gist-id-input">Gist ID (leave blank to auto-create):</label>
+            <input type="text" id="gist-id-input" placeholder="Auto-generated on first sync">
+            
+            <div class="modal-actions">
+                <button id="save-sync-btn">Save Credentials</button>
+                <button id="run-sync-btn">Sync Now 🔄</button>
+                <button id="close-modal-btn">Close</button>
+            </div>
+            <p id="sync-status"></p>
+        </div>
+    </div>
+
     <script src="localforage.min.js"></script>
     <script src="app.js"></script>
 </body>
