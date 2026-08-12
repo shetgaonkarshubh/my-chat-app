@@ -151,10 +151,11 @@ async function runGistSync(isSilent = false) {
     if (statusEl && !isSilent) statusEl.textContent = "Syncing with GitHub...";
 
     try {
-        // 1. Fetch Remote Gist Data if Gist ID exists
+        // 1. Fetch Remote Gist Data if Gist ID exists (Cache-Busted for iOS Safari)
         if (gistId) {
-            const res = await fetch(`https://api.github.com/gists/${gistId}`, {
-                headers: { 'Authorization': `token ${token}` }
+            const res = await fetch(`https://api.github.com/gists/${gistId}?t=${Date.now()}`, {
+                headers: { 'Authorization': `token ${token}` },
+                cache: 'no-store'
             });
             if (res.ok) {
                 const data = await res.json();
