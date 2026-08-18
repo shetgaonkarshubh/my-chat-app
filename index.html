@@ -2,27 +2,34 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Self Chat</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="style.css?v=4">
+    
+    <!-- Modern Geometric & Tech Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css?v=5">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Self Chat">
 </head>
 <body>
     <div id="app">
         <aside id="sidebar">
             <header>
-                <h2>My Chats</h2>
+                <h2>My Space</h2>
                 <div class="header-actions">
                     <button id="add-folder-btn" title="Create Folder">📁+</button>
-                    <button id="add-room-btn" title="Create Chat">+</button>
+                    <button id="add-room-btn" title="Create Chat">✦ New</button>
                     <button id="sync-settings-btn" title="Settings">⚙️</button>
                 </div>
             </header>
             <ul id="room-list"></ul>
         </aside>
+        
         <main id="chat-area">
             <header id="chat-header">
                 <button id="back-btn">←</button>
@@ -46,8 +53,11 @@
             <form id="message-form">
                 <input type="file" id="media-input" accept="image/*,video/*" style="display: none;">
                 <button type="button" id="attach-btn">📎</button>
-                <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
-                <button type="submit">Send</button>
+                <input type="text" id="message-input" placeholder="Drop a thought..." autocomplete="off">
+                <button type="submit">
+                    <span>Send</span>
+                    <span class="send-sparkle">✦</span>
+                </button>
             </form>
         </main>
     </div>
@@ -77,12 +87,12 @@
             
             <label for="theme-select">🎨 Color Theme:</label>
             <select id="theme-select">
-                <option value="default">Classic (Teal & Grey)</option>
-                <option value="black-red">1. Black & Red</option>
-                <option value="blue">2. Light & Dark Blue</option>
-                <option value="yellow-orange">3. Yellow & Orange</option>
-                <option value="pink-purple">4. Pink & Purple</option>
-                <option value="black-white">5. Black & White (OLED)</option>
+                <option value="default">Default: Cyber Emerald</option>
+                <option value="black-red">1. Black & Crimson Red</option>
+                <option value="blue">2. Cobalt & Neon Sky</option>
+                <option value="yellow-orange">3. Sunset Amber & Gold</option>
+                <option value="pink-purple">4. Cyberpunk Sakura (Pink & Purple)</option>
+                <option value="black-white">5. Velvet OLED (Monochrome)</option>
             </select>
 
             <label for="gh-token-input" style="margin-top: 8px;">GitHub Token:</label>
@@ -101,6 +111,6 @@
     </div>
 
     <script src="localforage.min.js"></script>
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
 </body>
 </html>
