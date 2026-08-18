@@ -413,6 +413,69 @@ body, html, #app {
 .context-menu button:hover { background: var(--bg-item-hover); }
 .context-menu button.menu-danger { color: #e05260; }
 
+/* Document & File Attachment Card */
+.file-attachment {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.15);
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 4px;
+}
+
+.file-icon {
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+}
+
+.file-info {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+}
+
+.file-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--msg-received-text);
+}
+
+.message.sent .file-name {
+    color: var(--msg-sent-text);
+}
+
+.file-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    opacity: 0.75;
+    margin-top: 1px;
+}
+
+.file-download-btn {
+    background: var(--primary-accent);
+    color: var(--primary-text);
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    transition: opacity 0.15s ease;
+}
+
+.file-download-btn:hover {
+    opacity: 0.85;
+}
+
 /* Chat Input Bar */
 #message-form { 
     background: var(--bg-header); 

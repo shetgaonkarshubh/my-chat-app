@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="style.css?v=6">
+    <link rel="stylesheet" href="style.css?v=7">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Self Chat">
@@ -51,9 +51,9 @@
             <div id="messages-container"></div>
 
             <form id="message-form">
-                <input type="file" id="media-input" accept="image/*,video/*" style="display: none;">
-                <button type="button" id="attach-btn">📎</button>
-                <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+                <input type="file" id="media-input" style="display: none;">
+                <button type="button" id="attach-btn" title="Attach file">📎</button>
+                <input type="text" id="message-input" placeholder="Type a message or paste an image..." autocomplete="off">
                 <button type="submit">Send</button>
             </form>
         </main>
@@ -108,6 +108,6 @@
     </div>
 
     <script src="localforage.min.js"></script>
-    <script src="app.js?v=6"></script>
+    <script src="app.js?v=7"></script>
 </body>
 </html>

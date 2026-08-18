@@ -173,6 +173,7 @@ function renderMessages() {
     }
     title.textContent = db.activeRoom;
 
+    // Display folder name in chat top bar
     const currentFolder = db.roomFolders ? db.roomFolders[db.activeRoom] : null;
     if (folderTag) {
         folderTag.textContent = currentFolder ? `📁 ${currentFolder}` : '';
@@ -186,6 +187,7 @@ function renderMessages() {
 
     const messages = db.rooms[db.activeRoom] || [];
     messages.forEach((msg, index) => {
+        // Ensure msg is an object with an ID
         if (typeof msg !== 'object') {
             msg = { id: generateId(), type: 'text', text: String(msg), timestamp: '' };
             db.rooms[db.activeRoom][index] = msg;
@@ -202,27 +204,69 @@ function renderMessages() {
         contentDiv.classList.add('message-content');
         let timeText = msg.timestamp || '';
 
+        // Render Media vs Documents vs Text
         if (msg.type === 'media') {
             if (msg.fileType && msg.fileType.startsWith('image/')) {
                 const img = document.createElement('img'); 
                 img.src = msg.data; 
                 img.style.maxWidth = '100%'; 
-                img.style.borderRadius = '4px'; 
+                img.style.borderRadius = '6px'; 
                 contentDiv.appendChild(img);
             } else if (msg.fileType && msg.fileType.startsWith('video/')) {
                 const video = document.createElement('video'); 
                 video.src = msg.data; 
                 video.controls = true; 
                 video.style.maxWidth = '100%'; 
-                video.style.borderRadius = '4px'; 
+                video.style.borderRadius = '6px'; 
                 contentDiv.appendChild(video);
+            } else if (msg.fileType && msg.fileType.startsWith('audio/')) {
+                const audio = document.createElement('audio');
+                audio.src = msg.data;
+                audio.controls = true;
+                audio.style.width = '100%';
+                contentDiv.appendChild(audio);
             }
+        } else if (msg.type === 'file') {
+            // General Files: PPT, Python, PDFs, ZIPs, Docs, etc.
+            const fileCard = document.createElement('div');
+            fileCard.classList.add('file-attachment');
+
+            const fileIcon = document.createElement('div');
+            fileIcon.classList.add('file-icon');
+            fileIcon.textContent = getFileIcon(msg.fileName || '', msg.fileType || '');
+
+            const fileInfo = document.createElement('div');
+            fileInfo.classList.add('file-info');
+
+            const fileName = document.createElement('span');
+            fileName.classList.add('file-name');
+            fileName.textContent = msg.fileName || 'Attachment';
+
+            const fileMeta = document.createElement('span');
+            fileMeta.classList.add('file-meta');
+            fileMeta.textContent = `${(msg.fileName.split('.').pop() || 'FILE').toUpperCase()} • ${formatBytes(msg.fileSize)}`;
+
+            fileInfo.appendChild(fileName);
+            fileInfo.appendChild(fileMeta);
+
+            const downloadBtn = document.createElement('a');
+            downloadBtn.classList.add('file-download-btn');
+            downloadBtn.href = msg.data;
+            downloadBtn.download = msg.fileName || 'file';
+            downloadBtn.textContent = '⬇ Download';
+            downloadBtn.onclick = (e) => e.stopPropagation();
+
+            fileCard.appendChild(fileIcon);
+            fileCard.appendChild(fileInfo);
+            fileCard.appendChild(downloadBtn);
+            contentDiv.appendChild(fileCard);
         } else {
             contentDiv.textContent = msg.text || '';
         }
 
         div.appendChild(contentDiv);
 
+        // Append timestamp and edit tag
         if (timeText) {
             const timeSpan = document.createElement('span');
             timeSpan.classList.add('message-time');
@@ -230,6 +274,7 @@ function renderMessages() {
             div.appendChild(timeSpan);
         }
 
+        // Tap/Click: Toggle selection in selection mode
         div.onclick = (e) => {
             if (isSelectionMode) {
                 e.stopPropagation();
@@ -237,12 +282,14 @@ function renderMessages() {
             }
         };
 
+        // Desktop Double-Click
         div.ondblclick = (e) => {
             if (isSelectionMode) return;
             e.stopPropagation();
             openContextMenu(e, index, msg);
         };
 
+        // Mobile Double-Tap Support
         let lastTap = 0;
         div.ontouchend = (e) => {
             if (isSelectionMode) return;
@@ -642,6 +689,56 @@ function startAutoSync() {
     autoSyncInterval = setInterval(() => runGistSync(true), 300000);
 }
 
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function getFileIcon(fileName, fileType) {
+    const ext = (fileName.split('.').pop() || '').toLowerCase();
+    if (['py', 'js', 'html', 'css', 'cpp', 'c', 'java', 'ts', 'json', 'sh', 'sql'].includes(ext)) return '📄';
+    if (['ppt', 'pptx'].includes(ext)) return '📊';
+    if (['doc', 'docx', 'txt', 'md', 'rtf'].includes(ext)) return '📝';
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return '📈';
+    if (['pdf'].includes(ext)) return '📕';
+    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜️';
+    if (fileType.startsWith('audio/')) return '🎵';
+    return '📁';
+}
+
+function handleFileUpload(file) {
+    if (!file || !db.activeRoom) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const isImage = file.type.startsWith('image/');
+        const isVideo = file.type.startsWith('video/');
+        const isAudio = file.type.startsWith('audio/');
+
+        const mediaObj = {
+            id: generateId(),
+            type: (isImage || isVideo || isAudio) ? 'media' : 'file',
+            fileName: file.name || (isImage ? `image_${Date.now()}.png` : 'file'),
+            fileSize: file.size || 0,
+            fileType: file.type || 'application/octet-stream',
+            data: e.target.result,
+            timestamp: getCurrentTimeStr(),
+            updatedAt: Date.now()
+        };
+
+        if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
+        db.rooms[db.activeRoom].push(mediaObj);
+        saveData();
+        renderMessages();
+        runGistSync(true);
+    };
+
+    reader.readAsDataURL(file);
+}
+
 function attachEventListeners() {
     const themeSelect = document.getElementById('theme-select');
     if (themeSelect) {
@@ -649,6 +746,34 @@ function attachEventListeners() {
             applyTheme(e.target.value);
         };
     }
+
+// File Attachment Button
+    const mediaInput = document.getElementById('media-input');
+    const attachBtn = document.getElementById('attach-btn');
+    if (attachBtn && mediaInput) {
+        attachBtn.onclick = () => mediaInput.click();
+        mediaInput.onchange = () => {
+            const file = mediaInput.files[0];
+            if (file) handleFileUpload(file);
+            mediaInput.value = '';
+        };
+    }
+
+    // Clipboard Paste Listener (Ctrl+V / Paste for screenshots, files, and images)
+    window.addEventListener('paste', (e) => {
+        if (!db.activeRoom) return;
+        const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file') {
+                const file = items[i].getAsFile();
+                if (file) {
+                    e.preventDefault();
+                    handleFileUpload(file);
+                    return;
+                }
+            }
+        }
+    });
 
     document.getElementById('save-sync-btn').onclick = () => {
         const token = document.getElementById('gh-token-input').value.trim();
