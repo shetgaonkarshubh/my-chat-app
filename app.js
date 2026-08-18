@@ -13,10 +13,7 @@ let isSelectionMode = false;
 let selectedMessageIds = new Set();
 let targetMessageData = null;
 
-// ==========================================
-// Helper & Utility Functions
-// ==========================================
-
+// Utility functions
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
@@ -62,30 +59,40 @@ function loadSavedTheme() {
     if (themeSelect) themeSelect.value = savedTheme;
 }
 
-// ==========================================
-// App Lifecycle & Storage
-// ==========================================
-
+// App Initialization
 function initApp() {
+    console.log("Initializing App...");
     loadSavedTheme();
 
     if (typeof localforage === 'undefined') {
+        console.warn("Waiting for localforage...");
         setTimeout(initApp, 100);
         return;
     }
+
     localforage.getItem('self_chat_db').then((savedData) => {
-        if (savedData) db = savedData;
+        if (savedData) {
+            db = savedData;
+        }
+        // Ensure defaults exist
+        if (!db.rooms) db.rooms = { "General Stuff": [] };
         if (!db.deleted) db.deleted = [];
         if (!db.folders) db.folders = [];
         if (!db.deletedFolders) db.deletedFolders = [];
         if (!db.roomFolders) db.roomFolders = {};
         if (!db.collapsedFolders) db.collapsedFolders = [];
+        if (!db.activeRoom || !db.rooms[db.activeRoom]) {
+            db.activeRoom = Object.keys(db.rooms)[0] || "General Stuff";
+        }
+
         renderRooms(); 
         renderMessages(); 
         attachEventListeners();
         loadSyncCredentials();
         startAutoSync();
-    }).catch(() => {
+        console.log("App initialized successfully.");
+    }).catch((err) => {
+        console.error("LocalForage load error:", err);
         renderRooms(); 
         renderMessages(); 
         attachEventListeners();
@@ -96,14 +103,11 @@ function initApp() {
 
 function saveData() { 
     if (typeof localforage !== 'undefined') {
-        localforage.setItem('self_chat_db', db).catch((err) => console.error(err));
+        localforage.setItem('self_chat_db', db).catch((err) => console.error("Error saving DB:", err));
     }
 }
 
-// ==========================================
-// Sidebar & Room Rendering
-// ==========================================
-
+// Sidebar & Rooms
 function createRoomElement(roomName, isNested = false) {
     const li = document.createElement('li');
     li.classList.add('room-item');
@@ -117,7 +121,8 @@ function createRoomElement(roomName, isNested = false) {
         saveData(); 
         renderRooms(); 
         renderMessages(); 
-        document.getElementById('app').classList.add('show-chat');
+        const appEl = document.getElementById('app');
+        if (appEl) appEl.classList.add('show-chat');
     };
     return li;
 }
@@ -130,7 +135,7 @@ function renderRooms() {
     const allRooms = Object.keys(db.rooms || {});
     const categorizedRooms = new Set();
 
-    // 1. Render Active Folders
+    // 1. Folders
     (db.folders || []).forEach(folderName => {
         const folderSection = document.createElement('div');
         folderSection.classList.add('folder-section');
@@ -160,10 +165,13 @@ function renderRooms() {
             renderRooms();
         };
 
-        folderHeader.querySelector('.folder-options').onclick = (e) => {
-            e.stopPropagation();
-            openFolderConfigModal(folderName);
-        };
+        const folderOpts = folderHeader.querySelector('.folder-options');
+        if (folderOpts) {
+            folderOpts.onclick = (e) => {
+                e.stopPropagation();
+                openFolderConfigModal(folderName);
+            };
+        }
 
         const folderRoomsUl = document.createElement('ul');
         folderRoomsUl.classList.add('folder-rooms');
@@ -180,7 +188,7 @@ function renderRooms() {
         list.appendChild(folderSection);
     });
 
-    // 2. Render Uncategorized Chats
+    // 2. Uncategorized Chats
     allRooms.forEach(roomName => {
         if (!categorizedRooms.has(roomName)) {
             list.appendChild(createRoomElement(roomName, false));
@@ -188,10 +196,7 @@ function renderRooms() {
     });
 }
 
-// ==========================================
 // Chat Messages Rendering
-// ==========================================
-
 function renderMessages() {
     const container = document.getElementById('messages-container');
     const title = document.getElementById('current-room-title');
@@ -235,7 +240,6 @@ function renderMessages() {
         contentDiv.classList.add('message-content');
         let timeText = msg.timestamp || '';
 
-        // Media vs Files vs Plain Text
         if (msg.type === 'media') {
             if (msg.fileType && msg.fileType.startsWith('image/')) {
                 const img = document.createElement('img'); 
@@ -335,10 +339,7 @@ function renderMessages() {
     container.scrollTop = container.scrollHeight;
 }
 
-// ==========================================
-// File Upload & Paste Handler
-// ==========================================
-
+// File Upload Handler
 function handleFileUpload(file) {
     if (!file || !db.activeRoom) return;
 
@@ -369,10 +370,7 @@ function handleFileUpload(file) {
     reader.readAsDataURL(file);
 }
 
-// ==========================================
-// Modals & Menu Actions
-// ==========================================
-
+// Context Menu
 function openContextMenu(e, index, msg) {
     targetMessageData = { index, msg };
     const menu = document.getElementById('message-context-menu');
@@ -401,6 +399,7 @@ function hideContextMenu() {
     targetMessageData = null;
 }
 
+// Folder Management Modal
 function openFolderConfigModal(folderName) {
     const modal = document.getElementById('folder-modal');
     const title = document.getElementById('folder-modal-title');
@@ -415,37 +414,43 @@ function openFolderConfigModal(folderName) {
         </div>
     `;
 
-    document.getElementById('rename-folder-btn').onclick = () => {
-        const newName = prompt("Enter new folder name:", folderName);
-        if (newName && newName.trim() && newName.trim() !== folderName) {
-            const clean = newName.trim();
-            db.folders = db.folders.map(f => f === folderName ? clean : f);
-            Object.keys(db.roomFolders).forEach(r => {
-                if (db.roomFolders[r] === folderName) db.roomFolders[r] = clean;
-            });
-            saveData();
-            renderRooms();
-            renderMessages();
-            modal.classList.add('hidden');
-            runGistSync(true);
-        }
-    };
+    const renameBtn = document.getElementById('rename-folder-btn');
+    if (renameBtn) {
+        renameBtn.onclick = () => {
+            const newName = prompt("Enter new folder name:", folderName);
+            if (newName && newName.trim() && newName.trim() !== folderName) {
+                const clean = newName.trim();
+                db.folders = db.folders.map(f => f === folderName ? clean : f);
+                Object.keys(db.roomFolders).forEach(r => {
+                    if (db.roomFolders[r] === folderName) db.roomFolders[r] = clean;
+                });
+                saveData();
+                renderRooms();
+                renderMessages();
+                modal.classList.add('hidden');
+                runGistSync(true);
+            }
+        };
+    }
 
-    document.getElementById('delete-folder-btn').onclick = () => {
-        if (confirm(`Delete folder "${folderName}"? All chats inside will be moved to Uncategorized.`)) {
-            if (!db.deletedFolders) db.deletedFolders = [];
-            db.deletedFolders.push(folderName);
-            db.folders = db.folders.filter(f => f !== folderName);
-            Object.keys(db.roomFolders).forEach(r => {
-                if (db.roomFolders[r] === folderName) delete db.roomFolders[r];
-            });
-            saveData();
-            renderRooms();
-            renderMessages();
-            modal.classList.add('hidden');
-            runGistSync(true);
-        }
-    };
+    const deleteBtn = document.getElementById('delete-folder-btn');
+    if (deleteBtn) {
+        deleteBtn.onclick = () => {
+            if (confirm(`Delete folder "${folderName}"? All chats inside will be moved to Uncategorized.`)) {
+                if (!db.deletedFolders) db.deletedFolders = [];
+                db.deletedFolders.push(folderName);
+                db.folders = db.folders.filter(f => f !== folderName);
+                Object.keys(db.roomFolders).forEach(r => {
+                    if (db.roomFolders[r] === folderName) delete db.roomFolders[r];
+                });
+                saveData();
+                renderRooms();
+                renderMessages();
+                modal.classList.add('hidden');
+                runGistSync(true);
+            }
+        };
+    }
 
     modal.classList.remove('hidden');
 }
@@ -513,48 +518,52 @@ function openRoomActionsMenu() {
         </div>
     `;
 
-    document.getElementById('act-move-room').onclick = openMoveRoomModal;
+    const moveBtn = document.getElementById('act-move-room');
+    if (moveBtn) moveBtn.onclick = openMoveRoomModal;
     
-    document.getElementById('act-rename-room').onclick = () => {
-        modal.classList.add('hidden');
-        const newName = prompt("Enter new name for chat:", room);
-        if (newName && newName.trim() && newName !== room) {
-            const clean = newName.trim();
-            db.rooms[clean] = db.rooms[room];
-            delete db.rooms[room];
-            if (db.roomFolders && db.roomFolders[room]) {
-                db.roomFolders[clean] = db.roomFolders[room];
-                delete db.roomFolders[room];
+    const renameBtn = document.getElementById('act-rename-room');
+    if (renameBtn) {
+        renameBtn.onclick = () => {
+            modal.classList.add('hidden');
+            const newName = prompt("Enter new name for chat:", room);
+            if (newName && newName.trim() && newName !== room) {
+                const clean = newName.trim();
+                db.rooms[clean] = db.rooms[room];
+                delete db.rooms[room];
+                if (db.roomFolders && db.roomFolders[room]) {
+                    db.roomFolders[clean] = db.roomFolders[room];
+                    delete db.roomFolders[room];
+                }
+                db.activeRoom = clean;
+                saveData();
+                renderRooms();
+                renderMessages();
+                runGistSync(true);
             }
-            db.activeRoom = clean;
-            saveData();
-            renderRooms();
-            renderMessages();
-            runGistSync(true);
-        }
-    };
+        };
+    }
 
-    document.getElementById('act-delete-room').onclick = () => {
-        modal.classList.add('hidden');
-        if (confirm(`Are you sure you want to permanently delete the chat "${room}"?`)) {
-            delete db.rooms[room];
-            if (db.roomFolders) delete db.roomFolders[room];
-            const remaining = Object.keys(db.rooms);
-            db.activeRoom = remaining.length > 0 ? remaining[0] : "";
-            saveData();
-            renderRooms();
-            renderMessages();
-            runGistSync(true);
-        }
-    };
+    const deleteBtn = document.getElementById('act-delete-room');
+    if (deleteBtn) {
+        deleteBtn.onclick = () => {
+            modal.classList.add('hidden');
+            if (confirm(`Are you sure you want to permanently delete the chat "${room}"?`)) {
+                delete db.rooms[room];
+                if (db.roomFolders) delete db.roomFolders[room];
+                const remaining = Object.keys(db.rooms);
+                db.activeRoom = remaining.length > 0 ? remaining[0] : "";
+                saveData();
+                renderRooms();
+                renderMessages();
+                runGistSync(true);
+            }
+        };
+    }
 
     modal.classList.remove('hidden');
 }
 
-// ==========================================
 // Multi-Selection Logic
-// ==========================================
-
 function enterSelectionMode(initialMsgId) {
     isSelectionMode = true;
     selectedMessageIds.clear();
@@ -612,10 +621,7 @@ function deleteSelectedMessages() {
     }
 }
 
-// ==========================================
 // Sync & Database Conflict Merger
-// ==========================================
-
 function mergeDatabases(local, remote) {
     const deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
     const deletedFolders = new Set([...(local.deletedFolders || []), ...(remote.deletedFolders || [])]);
@@ -769,10 +775,7 @@ function startAutoSync() {
     autoSyncInterval = setInterval(() => runGistSync(true), 300000);
 }
 
-// ==========================================
-// Event Listeners Registration
-// ==========================================
-
+// Event Listeners
 function attachEventListeners() {
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
@@ -884,14 +887,15 @@ function attachEventListeners() {
                     saveData(); 
                     renderRooms(); 
                     renderMessages(); 
-                    document.getElementById('app').classList.add('show-chat');
+                    const appEl = document.getElementById('app');
+                    if (appEl) appEl.classList.add('show-chat');
                     runGistSync(true);
                 }
             }
         };
     }
 
-    // Sync Modal
+    // Settings Modal
     const syncModal = document.getElementById('sync-modal');
     const syncSettingsBtn = document.getElementById('sync-settings-btn');
     if (syncSettingsBtn && syncModal) syncSettingsBtn.onclick = () => syncModal.classList.remove('hidden');
@@ -919,7 +923,7 @@ function attachEventListeners() {
     const runSyncBtn = document.getElementById('run-sync-btn');
     if (runSyncBtn) runSyncBtn.onclick = () => runGistSync(false);
 
-    // Media & File Handling
+    // Media & File Attachment Input
     const mediaInput = document.getElementById('media-input');
     const attachBtn = document.getElementById('attach-btn');
     if (attachBtn && mediaInput) {
@@ -931,7 +935,7 @@ function attachEventListeners() {
         };
     }
 
-    // Clipboard Paste Listener (Ctrl+V / Paste for screenshots, files, and images)
+    // Paste handler for screenshots / files
     window.addEventListener('paste', (e) => {
         if (!db.activeRoom) return;
         const items = (e.clipboardData || window.clipboardData)?.items || [];
@@ -947,7 +951,7 @@ function attachEventListeners() {
         }
     });
 
-    // Chat Message Form
+    // Message input form
     const messageForm = document.getElementById('message-form');
     if (messageForm) {
         messageForm.onsubmit = (e) => {
@@ -974,7 +978,13 @@ function attachEventListeners() {
     }
 }
 
-window.onload = initApp;
+// Boot up
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
+
 if ('serviceWorker' in navigator) { 
     navigator.serviceWorker.register('sw.js').catch(() => {}); 
 }
