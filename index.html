@@ -23,11 +23,23 @@
             <ul id="room-list"></ul>
         </aside>
         <main id="chat-area">
+            <!-- Normal Chat Header -->
             <header id="chat-header">
                 <button id="back-btn">←</button>
                 <h3 id="current-room-title">Select a room</h3>
             </header>
+
+            <!-- Selection Mode Header (Hidden by default) -->
+            <header id="selection-header" class="hidden">
+                <div class="selection-info">
+                    <button id="cancel-selection-btn">✕</button>
+                    <span id="selected-count">0 selected</span>
+                </div>
+                <button id="delete-selected-btn" class="action-btn-danger">🗑️ Delete</button>
+            </header>
+
             <div id="messages-container"></div>
+
             <form id="message-form">
                 <input type="file" id="media-input" accept="image/*,video/*" style="display: none;">
                 <button type="button" id="attach-btn">📎</button>
@@ -35,6 +47,13 @@
                 <button type="submit">Send</button>
             </form>
         </main>
+    </div>
+
+    <!-- Message Context Dropdown Menu -->
+    <div id="message-context-menu" class="context-menu hidden">
+        <button id="menu-edit-btn">✏️ Edit</button>
+        <button id="menu-select-btn">☑️ Select</button>
+        <button id="menu-delete-btn" class="menu-danger">🗑️ Delete</button>
     </div>
 
     <!-- Sync Settings Modal -->

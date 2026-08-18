@@ -1,6 +1,11 @@
 let db = { rooms: { "General Stuff": [] }, activeRoom: "General Stuff", deleted: [] };
 let autoSyncInterval = null;
 
+// Multi-select tracking state
+let isSelectionMode = false;
+let selectedMessageIds = new Set();
+let targetMessageData = null; // { index, msg } for single-message menu
+
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
@@ -47,6 +52,7 @@ function renderRooms() {
         li.textContent = roomName;
         if(roomName === db.activeRoom) li.classList.add('active');
         li.onclick = () => { 
+            exitSelectionMode();
             db.activeRoom = roomName; 
             saveData(); 
             renderRooms(); 
@@ -65,9 +71,14 @@ function renderMessages() {
     if(!db.activeRoom) { title.textContent = "Select a room"; return; }
     title.textContent = db.activeRoom;
     
+    if (isSelectionMode) {
+        container.classList.add('selecting');
+    } else {
+        container.classList.remove('selecting');
+    }
+
     const messages = db.rooms[db.activeRoom] || [];
     messages.forEach((msg, index) => {
-        // Upgrade legacy messages to object structure with IDs
         if (typeof msg !== 'object') {
             msg = { id: generateId(), type: 'text', text: String(msg), timestamp: '' };
             db.rooms[db.activeRoom][index] = msg;
@@ -78,6 +89,9 @@ function renderMessages() {
 
         const div = document.createElement('div');
         div.classList.add('message', 'sent');
+        if (selectedMessageIds.has(msg.id)) {
+            div.classList.add('selected');
+        }
 
         const contentDiv = document.createElement('div');
         contentDiv.classList.add('message-content');
@@ -111,43 +125,130 @@ function renderMessages() {
             div.appendChild(timeSpan);
         }
 
-        // Tap/Click to Edit or Delete
-        div.onclick = () => openMessageActionMenu(index, msg);
+        // Click handler: Toggle selection in selection mode
+        div.onclick = (e) => {
+            if (isSelectionMode) {
+                e.stopPropagation();
+                toggleMessageSelection(msg.id);
+            }
+        };
+
+        // Desktop Double-Click
+        div.ondblclick = (e) => {
+            if (isSelectionMode) return;
+            e.stopPropagation();
+            openContextMenu(e, index, msg);
+        };
+
+        // Mobile Double-Tap Support
+        let lastTap = 0;
+        div.ontouchend = (e) => {
+            if (isSelectionMode) return;
+            const currentTime = new Date().getTime();
+            const tapLength = currentTime - lastTap;
+            if (tapLength < 300 && tapLength > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                openContextMenu(e.changedTouches ? e.changedTouches[0] : e, index, msg);
+            }
+            lastTap = currentTime;
+        };
 
         container.appendChild(div);
     });
     container.scrollTop = container.scrollHeight;
 }
 
-function openMessageActionMenu(index, msg) {
-    const choices = msg.type === 'media' ? ["Delete Media", "Cancel"] : ["Edit Message", "Delete Message", "Cancel"];
-    const action = prompt(`Message Options:\n1: ${choices[0]}\n${choices[1] ? '2: ' + choices[1] : ''}\n${choices[2] ? '3: ' + choices[2] : ''}\n\nEnter option number:`);
+// Open custom dropdown menu positioned near the double-clicked message
+function openContextMenu(e, index, msg) {
+    targetMessageData = { index, msg };
+    const menu = document.getElementById('message-context-menu');
+    const editBtn = document.getElementById('menu-edit-btn');
 
-    if (msg.type === 'text' && action === '1') {
-        // Edit Message
-        const newText = prompt("Edit your message:", msg.text);
-        if (newText !== null && newText.trim() !== '') {
-            msg.text = newText.trim();
-            msg.edited = true;
-            msg.updatedAt = Date.now();
-            saveData();
-            renderMessages();
-            runGistSync(true);
-        }
-    } else if ((msg.type === 'text' && action === '2') || (msg.type === 'media' && action === '1')) {
-        // Delete Message
-        if (confirm("Are you sure you want to delete this message?")) {
-            if (!db.deleted) db.deleted = [];
-            db.deleted.push(msg.id);
-            db.rooms[db.activeRoom].splice(index, 1);
-            saveData();
-            renderMessages();
-            runGistSync(true);
-        }
+    // Only allow editing text messages
+    if (msg.type === 'media') {
+        editBtn.classList.add('hidden');
+    } else {
+        editBtn.classList.remove('hidden');
+    }
+
+    menu.classList.remove('hidden');
+
+    let x = e.clientX || (e.pageX || 100);
+    let y = e.clientY || (e.pageY || 100);
+
+    // Prevent menu overflowing offscreen
+    if (x + 150 > window.innerWidth) x = window.innerWidth - 160;
+    if (y + 140 > window.innerHeight) y = window.innerHeight - 150;
+
+    menu.style.left = `${Math.max(10, x)}px`;
+    menu.style.top = `${Math.max(10, y)}px`;
+}
+
+function hideContextMenu() {
+    const menu = document.getElementById('message-context-menu');
+    if (menu) menu.classList.add('hidden');
+    targetMessageData = null;
+}
+
+// Multi-Select Mode Controllers
+function enterSelectionMode(initialMsgId) {
+    isSelectionMode = true;
+    selectedMessageIds.clear();
+    if (initialMsgId) selectedMessageIds.add(initialMsgId);
+    
+    document.getElementById('chat-header').classList.add('hidden');
+    document.getElementById('selection-header').classList.remove('hidden');
+    updateSelectionCounter();
+    renderMessages();
+}
+
+function exitSelectionMode() {
+    isSelectionMode = false;
+    selectedMessageIds.clear();
+    document.getElementById('selection-header').classList.add('hidden');
+    document.getElementById('chat-header').classList.remove('hidden');
+    renderMessages();
+}
+
+function toggleMessageSelection(id) {
+    if (selectedMessageIds.has(id)) {
+        selectedMessageIds.delete(id);
+    } else {
+        selectedMessageIds.add(id);
+    }
+    if (selectedMessageIds.size === 0) {
+        exitSelectionMode();
+    } else {
+        updateSelectionCounter();
+        renderMessages();
     }
 }
 
-// Smart Merge taking tombstones & edited timestamps into account
+function updateSelectionCounter() {
+    const countEl = document.getElementById('selected-count');
+    if (countEl) countEl.textContent = `${selectedMessageIds.size} selected`;
+}
+
+function deleteSelectedMessages() {
+    if (selectedMessageIds.size === 0) return;
+    if (confirm(`Delete ${selectedMessageIds.size} selected message(s)?`)) {
+        if (!db.deleted) db.deleted = [];
+        
+        selectedMessageIds.forEach(id => db.deleted.push(id));
+        
+        db.rooms[db.activeRoom] = (db.rooms[db.activeRoom] || []).filter(msg => {
+            const msgId = typeof msg === 'object' ? msg.id : null;
+            return !selectedMessageIds.has(msgId);
+        });
+
+        saveData();
+        exitSelectionMode();
+        runGistSync(true);
+    }
+}
+
+// Smart Merge Deduplication
 function mergeDatabases(local, remote) {
     const deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
     const merged = { 
@@ -165,15 +266,11 @@ function mergeDatabases(local, remote) {
 
         [...localMsgs, ...remoteMsgs].forEach(msg => {
             if (!msg) return;
-
-            // Ensure msg is formatted as an object with an ID
             let msgObj = typeof msg === 'object' ? { ...msg } : { type: 'text', text: String(msg), timestamp: '' };
             if (!msgObj.id) msgObj.id = generateId();
 
-            // Ignore deleted messages
             if (deleted.has(msgObj.id)) return;
 
-            // Content-based unique key to prevent cross-device duplicates
             const contentKey = msgObj.type === 'media' 
                 ? `media_${msgObj.fileType}_${(msgObj.data || '').length}_${msgObj.timestamp || ''}` 
                 : `text_${msgObj.text || ''}_${msgObj.timestamp || ''}`;
@@ -181,7 +278,6 @@ function mergeDatabases(local, remote) {
             if (!map.has(contentKey)) {
                 map.set(contentKey, msgObj);
             } else {
-                // If the message already exists, keep the edited/updated version
                 const existing = map.get(contentKey);
                 if (msgObj.updatedAt && existing.updatedAt && msgObj.updatedAt > existing.updatedAt) {
                     map.set(contentKey, msgObj);
@@ -235,7 +331,6 @@ async function runGistSync(isSilent = false) {
 
             if (res.ok) {
                 const data = await res.json();
-                // Dynamically grab the first file regardless of filename
                 const fileKey = Object.keys(data.files || {})[0];
                 const content = fileKey ? data.files[fileKey]?.content : null;
 
@@ -297,6 +392,55 @@ function attachEventListeners() {
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
 
+    // Dismiss context menu when tapping outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#message-context-menu')) {
+            hideContextMenu();
+        }
+    });
+
+    // Context Menu Buttons
+    document.getElementById('menu-edit-btn').onclick = () => {
+        if (!targetMessageData) return;
+        const { msg } = targetMessageData;
+        hideContextMenu();
+        const newText = prompt("Edit your message:", msg.text);
+        if (newText !== null && newText.trim() !== '') {
+            msg.text = newText.trim();
+            msg.edited = true;
+            msg.updatedAt = Date.now();
+            saveData();
+            renderMessages();
+            runGistSync(true);
+        }
+    };
+
+    document.getElementById('menu-delete-btn').onclick = () => {
+        if (!targetMessageData) return;
+        const { index, msg } = targetMessageData;
+        hideContextMenu();
+        if (confirm("Delete this message?")) {
+            if (!db.deleted) db.deleted = [];
+            db.deleted.push(msg.id);
+            db.rooms[db.activeRoom].splice(index, 1);
+            saveData();
+            renderMessages();
+            runGistSync(true);
+        }
+    };
+
+    document.getElementById('menu-select-btn').onclick = () => {
+        if (!targetMessageData) return;
+        const { msg } = targetMessageData;
+        hideContextMenu();
+        enterSelectionMode(msg.id);
+    };
+
+    // Selection Header Buttons
+    document.getElementById('cancel-selection-btn').onclick = exitSelectionMode;
+    document.getElementById('delete-selected-btn').onclick = deleteSelectedMessages;
+
+    // Sync Modal
     const modal = document.getElementById('sync-modal');
     document.getElementById('sync-settings-btn').onclick = () => modal.classList.remove('hidden');
     document.getElementById('close-modal-btn').onclick = () => modal.classList.add('hidden');
