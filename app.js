@@ -634,9 +634,17 @@ function mergeDatabases(local, remote) {
         if (deletedFolders.has(mergedRoomFolders[r])) delete mergedRoomFolders[r];
     });
 
+    const allRooms = new Set([...Object.keys(local.rooms || {}), ...Object.keys(remote.rooms || {})]);
+    
+    // Ensure activeRoom never resets to blank or invalid room
+    let chosenActiveRoom = local.activeRoom;
+    if (!chosenActiveRoom || (!local.rooms?.[chosenActiveRoom] && !remote.rooms?.[chosenActiveRoom])) {
+        chosenActiveRoom = remote.activeRoom || Array.from(allRooms)[0] || "General Stuff";
+    }
+
     const merged = { 
         rooms: {}, 
-        activeRoom: local.activeRoom || remote.activeRoom || "General Stuff",
+        activeRoom: chosenActiveRoom,
         deleted: Array.from(deleted),
         deletedFolders: Array.from(deletedFolders),
         folders: Array.from(combinedFolders),
@@ -644,11 +652,9 @@ function mergeDatabases(local, remote) {
         collapsedFolders: local.collapsedFolders || []
     };
     
-    const allRooms = new Set([...Object.keys(local.rooms || {}), ...Object.keys(remote.rooms || {})]);
-    
     allRooms.forEach(room => {
-        const localMsgs = local.rooms[room] || [];
-        const remoteMsgs = remote.rooms[room] || [];
+        const localMsgs = local.rooms?.[room] || [];
+        const remoteMsgs = remote.rooms?.[room] || [];
         const map = new Map();
 
         [...localMsgs, ...remoteMsgs].forEach(msg => {
@@ -954,11 +960,26 @@ function attachEventListeners() {
     // Message input form
     const messageForm = document.getElementById('message-form');
     if (messageForm) {
+// Message Form Submit
+    const messageForm = document.getElementById('message-form');
+    if (messageForm) {
         messageForm.onsubmit = (e) => {
             e.preventDefault();
             const input = document.getElementById('message-input');
             if (!input) return;
             const text = input.value.trim();
+
+            // If no room is active, select the first available room
+            if (!db.activeRoom || !db.rooms[db.activeRoom]) {
+                const availableRooms = Object.keys(db.rooms || {});
+                if (availableRooms.length > 0) {
+                    db.activeRoom = availableRooms[0];
+                } else {
+                    db.rooms["General Stuff"] = [];
+                    db.activeRoom = "General Stuff";
+                }
+            }
+
             if (text && db.activeRoom) {
                 const textObj = { 
                     id: generateId(),
@@ -971,10 +992,12 @@ function attachEventListeners() {
                 db.rooms[db.activeRoom].push(textObj); 
                 input.value = ''; 
                 saveData(); 
+                renderRooms();
                 renderMessages();
                 runGistSync(true);
             }
         };
+    }
     }
 }
 
