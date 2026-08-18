@@ -2,9 +2,10 @@ let db = {
     rooms: { "General Stuff": [] }, 
     activeRoom: "General Stuff", 
     deleted: [],
-    folders: [], // List of folder names e.g. ["Personal", "Work"]
-    roomFolders: {}, // Map roomName -> folderName
-    collapsedFolders: [] // UI collapsed state
+    folders: [], 
+    deletedFolders: [],
+    roomFolders: {}, 
+    collapsedFolders: [] 
 };
 
 let autoSyncInterval = null;
@@ -25,6 +26,7 @@ function initApp() {
         if (savedData) db = savedData;
         if (!db.deleted) db.deleted = [];
         if (!db.folders) db.folders = [];
+        if (!db.deletedFolders) db.deletedFolders = [];
         if (!db.roomFolders) db.roomFolders = {};
         if (!db.collapsedFolders) db.collapsedFolders = [];
         renderRooms(); 
@@ -78,7 +80,7 @@ function renderRooms() {
     const allRooms = Object.keys(db.rooms || {});
     const categorizedRooms = new Set();
 
-    // 1. Render Folders
+    // 1. Render Active Folders
     (db.folders || []).forEach(folderName => {
         const folderSection = document.createElement('div');
         folderSection.classList.add('folder-section');
@@ -86,18 +88,16 @@ function renderRooms() {
             folderSection.classList.add('collapsed');
         }
 
-        // Folder Header Bar
         const folderHeader = document.createElement('div');
         folderHeader.classList.add('folder-header');
         folderHeader.innerHTML = `
             <div class="folder-header-title">
                 <span class="folder-arrow">▼</span>
-                📁 ${folderName}
+                <span>📁 ${folderName}</span>
             </div>
             <span class="folder-options" title="Folder Settings">⚙</span>
         `;
 
-        // Toggle Expand/Collapse
         folderHeader.onclick = (e) => {
             if (e.target.classList.contains('folder-options')) return;
             if (!db.collapsedFolders) db.collapsedFolders = [];
@@ -110,36 +110,11 @@ function renderRooms() {
             renderRooms();
         };
 
-        // Folder Options (Rename / Delete Folder)
         folderHeader.querySelector('.folder-options').onclick = (e) => {
             e.stopPropagation();
-            const act = prompt(`Folder: ${folderName}\n1: Rename Folder\n2: Delete Folder (Moves chats to Uncategorized)\n\nEnter option number:`);
-            if (act === '1') {
-                const newName = prompt("Enter new folder name:", folderName);
-                if (newName && newName.trim() && newName !== folderName) {
-                    const cleanName = newName.trim();
-                    db.folders = db.folders.map(f => f === folderName ? cleanName : f);
-                    Object.keys(db.roomFolders).forEach(r => {
-                        if (db.roomFolders[r] === folderName) db.roomFolders[r] = cleanName;
-                    });
-                    saveData();
-                    renderRooms();
-                    runGistSync(true);
-                }
-            } else if (act === '2') {
-                if (confirm(`Remove folder "${folderName}"? Your chats will be kept.`)) {
-                    db.folders = db.folders.filter(f => f !== folderName);
-                    Object.keys(db.roomFolders).forEach(r => {
-                        if (db.roomFolders[r] === folderName) delete db.roomFolders[r];
-                    });
-                    saveData();
-                    renderRooms();
-                    runGistSync(true);
-                }
-            }
+            openFolderConfigModal(folderName);
         };
 
-        // Folder Chat List
         const folderRoomsUl = document.createElement('ul');
         folderRoomsUl.classList.add('folder-rooms');
 
@@ -177,7 +152,6 @@ function renderMessages() {
     }
     title.textContent = db.activeRoom;
 
-    // Display folder name in chat top bar
     const currentFolder = db.roomFolders ? db.roomFolders[db.activeRoom] : null;
     if (folderTag) {
         folderTag.textContent = currentFolder ? `📁 ${currentFolder}` : '';
@@ -266,34 +240,151 @@ function renderMessages() {
     container.scrollTop = container.scrollHeight;
 }
 
-// Open Context Menu on double-click
-function openContextMenu(e, index, msg) {
-    targetMessageData = { index, msg };
-    const menu = document.getElementById('message-context-menu');
-    const editBtn = document.getElementById('menu-edit-btn');
+// Folder Action Modals (Reliable Replacement for Prompt Dialogs)
+function openFolderConfigModal(folderName) {
+    const modal = document.getElementById('folder-modal');
+    const title = document.getElementById('folder-modal-title');
+    const body = document.getElementById('folder-modal-body');
 
-    if (msg.type === 'media') {
-        editBtn.classList.add('hidden');
-    } else {
-        editBtn.classList.remove('hidden');
-    }
+    title.textContent = `Folder: ${folderName}`;
+    body.innerHTML = `
+        <div class="folder-action-list">
+            <button id="rename-folder-btn" class="folder-action-item">✏️ Rename Folder</button>
+            <button id="delete-folder-btn" class="folder-action-item" style="color: #ea4335;">🗑️ Delete Folder (Keeps Chats)</button>
+        </div>
+    `;
 
-    menu.classList.remove('hidden');
+    document.getElementById('rename-folder-btn').onclick = () => {
+        const newName = prompt("Enter new folder name:", folderName);
+        if (newName && newName.trim() && newName.trim() !== folderName) {
+            const clean = newName.trim();
+            db.folders = db.folders.map(f => f === folderName ? clean : f);
+            Object.keys(db.roomFolders).forEach(r => {
+                if (db.roomFolders[r] === folderName) db.roomFolders[r] = clean;
+            });
+            saveData();
+            renderRooms();
+            renderMessages();
+            modal.classList.add('hidden');
+            runGistSync(true);
+        }
+    };
 
-    let x = e.clientX || (e.pageX || 100);
-    let y = e.clientY || (e.pageY || 100);
+    document.getElementById('delete-folder-btn').onclick = () => {
+        if (confirm(`Delete folder "${folderName}"? All chats inside will be moved to Uncategorized.`)) {
+            if (!db.deletedFolders) db.deletedFolders = [];
+            db.deletedFolders.push(folderName);
+            db.folders = db.folders.filter(f => f !== folderName);
+            Object.keys(db.roomFolders).forEach(r => {
+                if (db.roomFolders[r] === folderName) delete db.roomFolders[r];
+            });
+            saveData();
+            renderRooms();
+            renderMessages();
+            modal.classList.add('hidden');
+            runGistSync(true);
+        }
+    };
 
-    if (x + 150 > window.innerWidth) x = window.innerWidth - 160;
-    if (y + 140 > window.innerHeight) y = window.innerHeight - 150;
-
-    menu.style.left = `${Math.max(10, x)}px`;
-    menu.style.top = `${Math.max(10, y)}px`;
+    modal.classList.remove('hidden');
 }
 
-function hideContextMenu() {
-    const menu = document.getElementById('message-context-menu');
-    if (menu) menu.classList.add('hidden');
-    targetMessageData = null;
+function openMoveRoomModal() {
+    const modal = document.getElementById('folder-modal');
+    const title = document.getElementById('folder-modal-title');
+    const body = document.getElementById('folder-modal-body');
+    const room = db.activeRoom;
+    const currentFolder = db.roomFolders ? (db.roomFolders[room] || null) : null;
+
+    title.textContent = `Move "${room}" to Folder`;
+    let html = `<div class="folder-action-list">`;
+    html += `
+        <button class="folder-action-item ${!currentFolder ? 'active' : ''}" onclick="assignRoomToFolder('${room}', null)">
+            <span>🚫 None (Uncategorized)</span>
+            ${!currentFolder ? '<span>✓</span>' : ''}
+        </button>
+    `;
+
+    (db.folders || []).forEach(folder => {
+        const isCurrent = currentFolder === folder;
+        html += `
+            <button class="folder-action-item ${isCurrent ? 'active' : ''}" onclick="assignRoomToFolder('${room}', '${folder}')">
+                <span>📁 ${folder}</span>
+                ${isCurrent ? '<span>✓</span>' : ''}
+            </button>
+        `;
+    });
+    html += `</div>`;
+    body.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+window.assignRoomToFolder = function(room, folder) {
+    if (!db.roomFolders) db.roomFolders = {};
+    if (!folder) {
+        delete db.roomFolders[room];
+    } else {
+        db.roomFolders[room] = folder;
+    }
+    saveData();
+    renderRooms();
+    renderMessages();
+    document.getElementById('folder-modal').classList.add('hidden');
+    runGistSync(true);
+};
+
+function openRoomActionsMenu() {
+    if (!db.activeRoom) return;
+    const room = db.activeRoom;
+    const modal = document.getElementById('folder-modal');
+    const title = document.getElementById('folder-modal-title');
+    const body = document.getElementById('folder-modal-body');
+
+    title.textContent = `Chat Settings: ${room}`;
+    body.innerHTML = `
+        <div class="folder-action-list">
+            <button id="act-move-room" class="folder-action-item">📁 Move to Folder</button>
+            <button id="act-rename-room" class="folder-action-item">✏️ Rename Chat</button>
+            <button id="act-delete-room" class="folder-action-item" style="color: #ea4335;">🗑️ Delete Entire Chat</button>
+        </div>
+    `;
+
+    document.getElementById('act-move-room').onclick = openMoveRoomModal;
+    
+    document.getElementById('act-rename-room').onclick = () => {
+        modal.classList.add('hidden');
+        const newName = prompt("Enter new name for chat:", room);
+        if (newName && newName.trim() && newName !== room) {
+            const clean = newName.trim();
+            db.rooms[clean] = db.rooms[room];
+            delete db.rooms[room];
+            if (db.roomFolders && db.roomFolders[room]) {
+                db.roomFolders[clean] = db.roomFolders[room];
+                delete db.roomFolders[room];
+            }
+            db.activeRoom = clean;
+            saveData();
+            renderRooms();
+            renderMessages();
+            runGistSync(true);
+        }
+    };
+
+    document.getElementById('act-delete-room').onclick = () => {
+        modal.classList.add('hidden');
+        if (confirm(`Are you sure you want to permanently delete the chat "${room}"?`)) {
+            delete db.rooms[room];
+            if (db.roomFolders) delete db.roomFolders[room];
+            const remaining = Object.keys(db.rooms);
+            db.activeRoom = remaining.length > 0 ? remaining[0] : "";
+            saveData();
+            renderRooms();
+            renderMessages();
+            runGistSync(true);
+        }
+    };
+
+    modal.classList.remove('hidden');
 }
 
 // Multi-Select Controllers
@@ -301,7 +392,6 @@ function enterSelectionMode(initialMsgId) {
     isSelectionMode = true;
     selectedMessageIds.clear();
     if (initialMsgId) selectedMessageIds.add(initialMsgId);
-    
     document.getElementById('chat-header').classList.add('hidden');
     document.getElementById('selection-header').classList.remove('hidden');
     updateSelectionCounter();
@@ -340,88 +430,62 @@ function deleteSelectedMessages() {
     if (confirm(`Delete ${selectedMessageIds.size} selected message(s)?`)) {
         if (!db.deleted) db.deleted = [];
         selectedMessageIds.forEach(id => db.deleted.push(id));
-        
         db.rooms[db.activeRoom] = (db.rooms[db.activeRoom] || []).filter(msg => {
             const msgId = typeof msg === 'object' ? msg.id : null;
             return !selectedMessageIds.has(msgId);
         });
-
         saveData();
         exitSelectionMode();
         runGistSync(true);
     }
 }
 
-// Chat Room Actions Menu (Move to Folder, Rename, Delete Chat)
-function openRoomActionsMenu() {
-    if (!db.activeRoom) return;
-    const room = db.activeRoom;
-    const currentFolder = db.roomFolders ? (db.roomFolders[room] || "None") : "None";
-    
-    const choice = prompt(`Chat Options: "${room}"\nCurrent Folder: ${currentFolder}\n\n1: Move to Folder\n2: Rename Chat\n3: Delete Chat\n\nEnter option number:`);
-    
-    if (choice === '1') {
-        if (!db.folders || db.folders.length === 0) {
-            alert("No folders exist yet. Create a folder using the 📁+ button first.");
-            return;
-        }
-        let folderOptions = "Select Folder:\n0: Uncategorized (None)\n";
-        db.folders.forEach((f, i) => folderOptions += `${i + 1}: ${f}\n`);
-        const folderPick = prompt(folderOptions);
-        if (folderPick !== null) {
-            const idx = parseInt(folderPick, 10);
-            if (idx === 0) {
-                delete db.roomFolders[room];
-            } else if (idx > 0 && idx <= db.folders.length) {
-                if (!db.roomFolders) db.roomFolders = {};
-                db.roomFolders[room] = db.folders[idx - 1];
-            }
-            saveData();
-            renderRooms();
-            renderMessages();
-            runGistSync(true);
-        }
-    } else if (choice === '2') {
-        const newName = prompt("Enter new name for chat:", room);
-        if (newName && newName.trim() && newName !== room) {
-            const clean = newName.trim();
-            db.rooms[clean] = db.rooms[room];
-            delete db.rooms[room];
-            if (db.roomFolders && db.roomFolders[room]) {
-                db.roomFolders[clean] = db.roomFolders[room];
-                delete db.roomFolders[room];
-            }
-            db.activeRoom = clean;
-            saveData();
-            renderRooms();
-            renderMessages();
-            runGistSync(true);
-        }
-    } else if (choice === '3') {
-        if (confirm(`Are you sure you want to permanently delete the chat "${room}" and all its messages?`)) {
-            delete db.rooms[room];
-            if (db.roomFolders) delete db.roomFolders[room];
-            const remaining = Object.keys(db.rooms);
-            db.activeRoom = remaining.length > 0 ? remaining[0] : "";
-            saveData();
-            renderRooms();
-            renderMessages();
-            runGistSync(true);
-        }
+// Context Menu
+function openContextMenu(e, index, msg) {
+    targetMessageData = { index, msg };
+    const menu = document.getElementById('message-context-menu');
+    const editBtn = document.getElementById('menu-edit-btn');
+    if (msg.type === 'media') {
+        editBtn.classList.add('hidden');
+    } else {
+        editBtn.classList.remove('hidden');
     }
+    menu.classList.remove('hidden');
+
+    let x = e.clientX || (e.pageX || 100);
+    let y = e.clientY || (e.pageY || 100);
+    if (x + 150 > window.innerWidth) x = window.innerWidth - 160;
+    if (y + 140 > window.innerHeight) y = window.innerHeight - 150;
+
+    menu.style.left = `${Math.max(10, x)}px`;
+    menu.style.top = `${Math.max(10, y)}px`;
 }
 
-// Database Synchronization & Conflict Merge
+function hideContextMenu() {
+    const menu = document.getElementById('message-context-menu');
+    if (menu) menu.classList.add('hidden');
+    targetMessageData = null;
+}
+
+// Conflict-Free Merge
 function mergeDatabases(local, remote) {
     const deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
-    const mergedFolders = Array.from(new Set([...(local.folders || []), ...(remote.folders || [])]));
+    const deletedFolders = new Set([...(local.deletedFolders || []), ...(remote.deletedFolders || [])]);
+
+    const combinedFolders = new Set([...(local.folders || []), ...(remote.folders || [])]);
+    deletedFolders.forEach(df => combinedFolders.delete(df));
+
     const mergedRoomFolders = { ...(remote.roomFolders || {}), ...(local.roomFolders || {}) };
+    Object.keys(mergedRoomFolders).forEach(r => {
+        if (deletedFolders.has(mergedRoomFolders[r])) delete mergedRoomFolders[r];
+    });
 
     const merged = { 
         rooms: {}, 
         activeRoom: local.activeRoom || remote.activeRoom || "General Stuff",
         deleted: Array.from(deleted),
-        folders: mergedFolders,
+        deletedFolders: Array.from(deletedFolders),
+        folders: Array.from(combinedFolders),
         roomFolders: mergedRoomFolders,
         collapsedFolders: local.collapsedFolders || []
     };
@@ -564,10 +628,12 @@ function attachEventListeners() {
     const roomOptionsBtn = document.getElementById('room-options-btn');
     if (roomOptionsBtn) roomOptionsBtn.onclick = openRoomActionsMenu;
 
+    document.getElementById('close-folder-modal-btn').onclick = () => {
+        document.getElementById('folder-modal').classList.add('hidden');
+    };
+
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('#message-context-menu')) {
-            hideContextMenu();
-        }
+        if (!e.target.closest('#message-context-menu')) hideContextMenu();
     });
 
     document.getElementById('menu-edit-btn').onclick = () => {
@@ -609,7 +675,6 @@ function attachEventListeners() {
     document.getElementById('cancel-selection-btn').onclick = exitSelectionMode;
     document.getElementById('delete-selected-btn').onclick = deleteSelectedMessages;
 
-    // Create Folder Button
     document.getElementById('add-folder-btn').onclick = () => {
         const folderName = prompt("Enter new folder name (e.g. Work, Notes, Spotify):");
         if (folderName && folderName.trim()) {
@@ -617,6 +682,9 @@ function attachEventListeners() {
             if (!db.folders) db.folders = [];
             if (!db.folders.includes(cleanName)) {
                 db.folders.push(cleanName);
+                if (db.deletedFolders) {
+                    db.deletedFolders = db.deletedFolders.filter(df => df !== cleanName);
+                }
                 saveData();
                 renderRooms();
                 runGistSync(true);
@@ -626,7 +694,6 @@ function attachEventListeners() {
         }
     };
 
-    // Create Room Button
     document.getElementById('add-room-btn').onclick = () => {
         const name = prompt("Enter new chat category name:");
         if (name && name.trim()) {
