@@ -1,10 +1,16 @@
-let db = { rooms: { "General Stuff": [] }, activeRoom: "General Stuff", deleted: [] };
-let autoSyncInterval = null;
+let db = { 
+    rooms: { "General Stuff": [] }, 
+    activeRoom: "General Stuff", 
+    deleted: [],
+    folders: [], // List of folder names e.g. ["Personal", "Work"]
+    roomFolders: {}, // Map roomName -> folderName
+    collapsedFolders: [] // UI collapsed state
+};
 
-// Multi-select tracking state
+let autoSyncInterval = null;
 let isSelectionMode = false;
 let selectedMessageIds = new Set();
-let targetMessageData = null; // { index, msg } for single-message menu
+let targetMessageData = null;
 
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
@@ -18,6 +24,9 @@ function initApp() {
     localforage.getItem('self_chat_db').then((savedData) => {
         if (savedData) db = savedData;
         if (!db.deleted) db.deleted = [];
+        if (!db.folders) db.folders = [];
+        if (!db.roomFolders) db.roomFolders = {};
+        if (!db.collapsedFolders) db.collapsedFolders = [];
         renderRooms(); 
         renderMessages(); 
         attachEventListeners();
@@ -43,33 +52,136 @@ function getCurrentTimeStr() {
     return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
+function createRoomElement(roomName, isNested = false) {
+    const li = document.createElement('li');
+    li.classList.add('room-item');
+    if (isNested) li.classList.add('nested');
+    li.textContent = roomName;
+    if (roomName === db.activeRoom) li.classList.add('active');
+
+    li.onclick = () => { 
+        exitSelectionMode();
+        db.activeRoom = roomName; 
+        saveData(); 
+        renderRooms(); 
+        renderMessages(); 
+        document.getElementById('app').classList.add('show-chat');
+    };
+    return li;
+}
+
 function renderRooms() {
     const list = document.getElementById('room-list');
     if (!list) return;
     list.innerHTML = '';
-    Object.keys(db.rooms).forEach(roomName => {
-        const li = document.createElement('li');
-        li.textContent = roomName;
-        if(roomName === db.activeRoom) li.classList.add('active');
-        li.onclick = () => { 
-            exitSelectionMode();
-            db.activeRoom = roomName; 
-            saveData(); 
-            renderRooms(); 
-            renderMessages(); 
-            document.getElementById('app').classList.add('show-chat');
+
+    const allRooms = Object.keys(db.rooms || {});
+    const categorizedRooms = new Set();
+
+    // 1. Render Folders
+    (db.folders || []).forEach(folderName => {
+        const folderSection = document.createElement('div');
+        folderSection.classList.add('folder-section');
+        if ((db.collapsedFolders || []).includes(folderName)) {
+            folderSection.classList.add('collapsed');
+        }
+
+        // Folder Header Bar
+        const folderHeader = document.createElement('div');
+        folderHeader.classList.add('folder-header');
+        folderHeader.innerHTML = `
+            <div class="folder-header-title">
+                <span class="folder-arrow">▼</span>
+                📁 ${folderName}
+            </div>
+            <span class="folder-options" title="Folder Settings">⚙</span>
+        `;
+
+        // Toggle Expand/Collapse
+        folderHeader.onclick = (e) => {
+            if (e.target.classList.contains('folder-options')) return;
+            if (!db.collapsedFolders) db.collapsedFolders = [];
+            if (folderSection.classList.contains('collapsed')) {
+                db.collapsedFolders = db.collapsedFolders.filter(f => f !== folderName);
+            } else {
+                db.collapsedFolders.push(folderName);
+            }
+            saveData();
+            renderRooms();
         };
-        list.appendChild(li);
+
+        // Folder Options (Rename / Delete Folder)
+        folderHeader.querySelector('.folder-options').onclick = (e) => {
+            e.stopPropagation();
+            const act = prompt(`Folder: ${folderName}\n1: Rename Folder\n2: Delete Folder (Moves chats to Uncategorized)\n\nEnter option number:`);
+            if (act === '1') {
+                const newName = prompt("Enter new folder name:", folderName);
+                if (newName && newName.trim() && newName !== folderName) {
+                    const cleanName = newName.trim();
+                    db.folders = db.folders.map(f => f === folderName ? cleanName : f);
+                    Object.keys(db.roomFolders).forEach(r => {
+                        if (db.roomFolders[r] === folderName) db.roomFolders[r] = cleanName;
+                    });
+                    saveData();
+                    renderRooms();
+                    runGistSync(true);
+                }
+            } else if (act === '2') {
+                if (confirm(`Remove folder "${folderName}"? Your chats will be kept.`)) {
+                    db.folders = db.folders.filter(f => f !== folderName);
+                    Object.keys(db.roomFolders).forEach(r => {
+                        if (db.roomFolders[r] === folderName) delete db.roomFolders[r];
+                    });
+                    saveData();
+                    renderRooms();
+                    runGistSync(true);
+                }
+            }
+        };
+
+        // Folder Chat List
+        const folderRoomsUl = document.createElement('ul');
+        folderRoomsUl.classList.add('folder-rooms');
+
+        allRooms.forEach(roomName => {
+            if (db.roomFolders && db.roomFolders[roomName] === folderName) {
+                categorizedRooms.add(roomName);
+                folderRoomsUl.appendChild(createRoomElement(roomName, true));
+            }
+        });
+
+        folderSection.appendChild(folderHeader);
+        folderSection.appendChild(folderRoomsUl);
+        list.appendChild(folderSection);
+    });
+
+    // 2. Render Uncategorized Chats
+    allRooms.forEach(roomName => {
+        if (!categorizedRooms.has(roomName)) {
+            list.appendChild(createRoomElement(roomName, false));
+        }
     });
 }
 
 function renderMessages() {
     const container = document.getElementById('messages-container');
     const title = document.getElementById('current-room-title');
+    const folderTag = document.getElementById('current-room-folder');
     if (!container || !title) return;
     container.innerHTML = '';
-    if(!db.activeRoom) { title.textContent = "Select a room"; return; }
+    
+    if (!db.activeRoom) { 
+        title.textContent = "Select a room"; 
+        if (folderTag) folderTag.textContent = "";
+        return; 
+    }
     title.textContent = db.activeRoom;
+
+    // Display folder name in chat top bar
+    const currentFolder = db.roomFolders ? db.roomFolders[db.activeRoom] : null;
+    if (folderTag) {
+        folderTag.textContent = currentFolder ? `📁 ${currentFolder}` : '';
+    }
     
     if (isSelectionMode) {
         container.classList.add('selecting');
@@ -89,9 +201,7 @@ function renderMessages() {
 
         const div = document.createElement('div');
         div.classList.add('message', 'sent');
-        if (selectedMessageIds.has(msg.id)) {
-            div.classList.add('selected');
-        }
+        if (selectedMessageIds.has(msg.id)) div.classList.add('selected');
 
         const contentDiv = document.createElement('div');
         contentDiv.classList.add('message-content');
@@ -125,7 +235,6 @@ function renderMessages() {
             div.appendChild(timeSpan);
         }
 
-        // Click handler: Toggle selection in selection mode
         div.onclick = (e) => {
             if (isSelectionMode) {
                 e.stopPropagation();
@@ -133,14 +242,12 @@ function renderMessages() {
             }
         };
 
-        // Desktop Double-Click
         div.ondblclick = (e) => {
             if (isSelectionMode) return;
             e.stopPropagation();
             openContextMenu(e, index, msg);
         };
 
-        // Mobile Double-Tap Support
         let lastTap = 0;
         div.ontouchend = (e) => {
             if (isSelectionMode) return;
@@ -159,13 +266,12 @@ function renderMessages() {
     container.scrollTop = container.scrollHeight;
 }
 
-// Open custom dropdown menu positioned near the double-clicked message
+// Open Context Menu on double-click
 function openContextMenu(e, index, msg) {
     targetMessageData = { index, msg };
     const menu = document.getElementById('message-context-menu');
     const editBtn = document.getElementById('menu-edit-btn');
 
-    // Only allow editing text messages
     if (msg.type === 'media') {
         editBtn.classList.add('hidden');
     } else {
@@ -177,7 +283,6 @@ function openContextMenu(e, index, msg) {
     let x = e.clientX || (e.pageX || 100);
     let y = e.clientY || (e.pageY || 100);
 
-    // Prevent menu overflowing offscreen
     if (x + 150 > window.innerWidth) x = window.innerWidth - 160;
     if (y + 140 > window.innerHeight) y = window.innerHeight - 150;
 
@@ -191,7 +296,7 @@ function hideContextMenu() {
     targetMessageData = null;
 }
 
-// Multi-Select Mode Controllers
+// Multi-Select Controllers
 function enterSelectionMode(initialMsgId) {
     isSelectionMode = true;
     selectedMessageIds.clear();
@@ -234,7 +339,6 @@ function deleteSelectedMessages() {
     if (selectedMessageIds.size === 0) return;
     if (confirm(`Delete ${selectedMessageIds.size} selected message(s)?`)) {
         if (!db.deleted) db.deleted = [];
-        
         selectedMessageIds.forEach(id => db.deleted.push(id));
         
         db.rooms[db.activeRoom] = (db.rooms[db.activeRoom] || []).filter(msg => {
@@ -248,13 +352,78 @@ function deleteSelectedMessages() {
     }
 }
 
-// Smart Merge Deduplication
+// Chat Room Actions Menu (Move to Folder, Rename, Delete Chat)
+function openRoomActionsMenu() {
+    if (!db.activeRoom) return;
+    const room = db.activeRoom;
+    const currentFolder = db.roomFolders ? (db.roomFolders[room] || "None") : "None";
+    
+    const choice = prompt(`Chat Options: "${room}"\nCurrent Folder: ${currentFolder}\n\n1: Move to Folder\n2: Rename Chat\n3: Delete Chat\n\nEnter option number:`);
+    
+    if (choice === '1') {
+        if (!db.folders || db.folders.length === 0) {
+            alert("No folders exist yet. Create a folder using the 📁+ button first.");
+            return;
+        }
+        let folderOptions = "Select Folder:\n0: Uncategorized (None)\n";
+        db.folders.forEach((f, i) => folderOptions += `${i + 1}: ${f}\n`);
+        const folderPick = prompt(folderOptions);
+        if (folderPick !== null) {
+            const idx = parseInt(folderPick, 10);
+            if (idx === 0) {
+                delete db.roomFolders[room];
+            } else if (idx > 0 && idx <= db.folders.length) {
+                if (!db.roomFolders) db.roomFolders = {};
+                db.roomFolders[room] = db.folders[idx - 1];
+            }
+            saveData();
+            renderRooms();
+            renderMessages();
+            runGistSync(true);
+        }
+    } else if (choice === '2') {
+        const newName = prompt("Enter new name for chat:", room);
+        if (newName && newName.trim() && newName !== room) {
+            const clean = newName.trim();
+            db.rooms[clean] = db.rooms[room];
+            delete db.rooms[room];
+            if (db.roomFolders && db.roomFolders[room]) {
+                db.roomFolders[clean] = db.roomFolders[room];
+                delete db.roomFolders[room];
+            }
+            db.activeRoom = clean;
+            saveData();
+            renderRooms();
+            renderMessages();
+            runGistSync(true);
+        }
+    } else if (choice === '3') {
+        if (confirm(`Are you sure you want to permanently delete the chat "${room}" and all its messages?`)) {
+            delete db.rooms[room];
+            if (db.roomFolders) delete db.roomFolders[room];
+            const remaining = Object.keys(db.rooms);
+            db.activeRoom = remaining.length > 0 ? remaining[0] : "";
+            saveData();
+            renderRooms();
+            renderMessages();
+            runGistSync(true);
+        }
+    }
+}
+
+// Database Synchronization & Conflict Merge
 function mergeDatabases(local, remote) {
     const deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
+    const mergedFolders = Array.from(new Set([...(local.folders || []), ...(remote.folders || [])]));
+    const mergedRoomFolders = { ...(remote.roomFolders || {}), ...(local.roomFolders || {}) };
+
     const merged = { 
         rooms: {}, 
         activeRoom: local.activeRoom || remote.activeRoom || "General Stuff",
-        deleted: Array.from(deleted)
+        deleted: Array.from(deleted),
+        folders: mergedFolders,
+        roomFolders: mergedRoomFolders,
+        collapsedFolders: local.collapsedFolders || []
     };
     
     const allRooms = new Set([...Object.keys(local.rooms || {}), ...Object.keys(remote.rooms || {})]);
@@ -392,14 +561,15 @@ function attachEventListeners() {
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
 
-    // Dismiss context menu when tapping outside
+    const roomOptionsBtn = document.getElementById('room-options-btn');
+    if (roomOptionsBtn) roomOptionsBtn.onclick = openRoomActionsMenu;
+
     document.addEventListener('click', (e) => {
         if (!e.target.closest('#message-context-menu')) {
             hideContextMenu();
         }
     });
 
-    // Context Menu Buttons
     document.getElementById('menu-edit-btn').onclick = () => {
         if (!targetMessageData) return;
         const { msg } = targetMessageData;
@@ -436,9 +606,42 @@ function attachEventListeners() {
         enterSelectionMode(msg.id);
     };
 
-    // Selection Header Buttons
     document.getElementById('cancel-selection-btn').onclick = exitSelectionMode;
     document.getElementById('delete-selected-btn').onclick = deleteSelectedMessages;
+
+    // Create Folder Button
+    document.getElementById('add-folder-btn').onclick = () => {
+        const folderName = prompt("Enter new folder name (e.g. Work, Notes, Spotify):");
+        if (folderName && folderName.trim()) {
+            const cleanName = folderName.trim();
+            if (!db.folders) db.folders = [];
+            if (!db.folders.includes(cleanName)) {
+                db.folders.push(cleanName);
+                saveData();
+                renderRooms();
+                runGistSync(true);
+            } else {
+                alert("Folder already exists.");
+            }
+        }
+    };
+
+    // Create Room Button
+    document.getElementById('add-room-btn').onclick = () => {
+        const name = prompt("Enter new chat category name:");
+        if (name && name.trim()) {
+            const clean = name.trim();
+            if (!db.rooms[clean]) {
+                db.rooms[clean] = []; 
+                db.activeRoom = clean; 
+                saveData(); 
+                renderRooms(); 
+                renderMessages(); 
+                document.getElementById('app').classList.add('show-chat');
+                runGistSync(true);
+            }
+        }
+    };
 
     // Sync Modal
     const modal = document.getElementById('sync-modal');
@@ -456,18 +659,7 @@ function attachEventListeners() {
 
     document.getElementById('run-sync-btn').onclick = () => runGistSync(false);
 
-    document.getElementById('add-room-btn').onclick = () => {
-        const name = prompt("Enter new chat category name:");
-        if(name && !db.rooms[name]) { 
-            db.rooms[name] = []; 
-            db.activeRoom = name; 
-            saveData(); 
-            renderRooms(); 
-            renderMessages(); 
-            document.getElementById('app').classList.add('show-chat');
-        }
-    };
-
+    // Media & Form Handling
     const mediaInput = document.getElementById('media-input');
     const attachBtn = document.getElementById('attach-btn');
     if (attachBtn && mediaInput) {
@@ -501,7 +693,7 @@ function attachEventListeners() {
             e.preventDefault();
             const input = document.getElementById('message-input'); if (!input) return;
             const text = input.value.trim();
-            if(text && db.activeRoom) {
+            if (text && db.activeRoom) {
                 const textObj = { 
                     id: generateId(),
                     type: 'text', 
