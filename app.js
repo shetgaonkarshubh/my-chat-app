@@ -13,8 +13,37 @@ let isSelectionMode = false;
 let selectedMessageIds = new Set();
 let targetMessageData = null;
 
+// ==========================================
+// Helper & Utility Functions
+// ==========================================
+
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+function getCurrentTimeStr() {
+    const now = new Date();
+    return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function getFileIcon(fileName, fileType) {
+    const ext = (fileName && fileName.includes('.') ? fileName.split('.').pop() : '').toLowerCase();
+    if (['py', 'js', 'html', 'css', 'cpp', 'c', 'java', 'ts', 'json', 'sh', 'sql', 'ipynb'].includes(ext)) return '📄';
+    if (['ppt', 'pptx'].includes(ext)) return '📊';
+    if (['doc', 'docx', 'txt', 'md', 'rtf'].includes(ext)) return '📝';
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return '📈';
+    if (['pdf'].includes(ext)) return '📕';
+    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜️';
+    if (fileType && fileType.startsWith('audio/')) return '🎵';
+    return '📁';
 }
 
 function applyTheme(themeName) {
@@ -33,12 +62,13 @@ function loadSavedTheme() {
     if (themeSelect) themeSelect.value = savedTheme;
 }
 
+// ==========================================
+// App Lifecycle & Storage
+// ==========================================
+
 function initApp() {
     loadSavedTheme();
-    if (typeof localforage === 'undefined') {
-        setTimeout(initApp, 100);
-        return;
-    }
+
     if (typeof localforage === 'undefined') {
         setTimeout(initApp, 100);
         return;
@@ -70,10 +100,9 @@ function saveData() {
     }
 }
 
-function getCurrentTimeStr() {
-    const now = new Date();
-    return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-}
+// ==========================================
+// Sidebar & Room Rendering
+// ==========================================
 
 function createRoomElement(roomName, isNested = false) {
     const li = document.createElement('li');
@@ -159,6 +188,10 @@ function renderRooms() {
     });
 }
 
+// ==========================================
+// Chat Messages Rendering
+// ==========================================
+
 function renderMessages() {
     const container = document.getElementById('messages-container');
     const title = document.getElementById('current-room-title');
@@ -173,7 +206,6 @@ function renderMessages() {
     }
     title.textContent = db.activeRoom;
 
-    // Display folder name in chat top bar
     const currentFolder = db.roomFolders ? db.roomFolders[db.activeRoom] : null;
     if (folderTag) {
         folderTag.textContent = currentFolder ? `📁 ${currentFolder}` : '';
@@ -187,7 +219,6 @@ function renderMessages() {
 
     const messages = db.rooms[db.activeRoom] || [];
     messages.forEach((msg, index) => {
-        // Ensure msg is an object with an ID
         if (typeof msg !== 'object') {
             msg = { id: generateId(), type: 'text', text: String(msg), timestamp: '' };
             db.rooms[db.activeRoom][index] = msg;
@@ -204,7 +235,7 @@ function renderMessages() {
         contentDiv.classList.add('message-content');
         let timeText = msg.timestamp || '';
 
-        // Render Media vs Documents vs Text
+        // Media vs Files vs Plain Text
         if (msg.type === 'media') {
             if (msg.fileType && msg.fileType.startsWith('image/')) {
                 const img = document.createElement('img'); 
@@ -227,7 +258,6 @@ function renderMessages() {
                 contentDiv.appendChild(audio);
             }
         } else if (msg.type === 'file') {
-            // General Files: PPT, Python, PDFs, ZIPs, Docs, etc.
             const fileCard = document.createElement('div');
             fileCard.classList.add('file-attachment');
 
@@ -244,7 +274,8 @@ function renderMessages() {
 
             const fileMeta = document.createElement('span');
             fileMeta.classList.add('file-meta');
-            fileMeta.textContent = `${(msg.fileName.split('.').pop() || 'FILE').toUpperCase()} • ${formatBytes(msg.fileSize)}`;
+            const ext = (msg.fileName && msg.fileName.includes('.') ? msg.fileName.split('.').pop() : 'FILE').toUpperCase();
+            fileMeta.textContent = `${ext} • ${formatBytes(msg.fileSize)}`;
 
             fileInfo.appendChild(fileName);
             fileInfo.appendChild(fileMeta);
@@ -266,7 +297,6 @@ function renderMessages() {
 
         div.appendChild(contentDiv);
 
-        // Append timestamp and edit tag
         if (timeText) {
             const timeSpan = document.createElement('span');
             timeSpan.classList.add('message-time');
@@ -274,7 +304,6 @@ function renderMessages() {
             div.appendChild(timeSpan);
         }
 
-        // Tap/Click: Toggle selection in selection mode
         div.onclick = (e) => {
             if (isSelectionMode) {
                 e.stopPropagation();
@@ -282,14 +311,12 @@ function renderMessages() {
             }
         };
 
-        // Desktop Double-Click
         div.ondblclick = (e) => {
             if (isSelectionMode) return;
             e.stopPropagation();
             openContextMenu(e, index, msg);
         };
 
-        // Mobile Double-Tap Support
         let lastTap = 0;
         div.ontouchend = (e) => {
             if (isSelectionMode) return;
@@ -308,11 +335,77 @@ function renderMessages() {
     container.scrollTop = container.scrollHeight;
 }
 
-// Folder Action Modals (Reliable Replacement for Prompt Dialogs)
+// ==========================================
+// File Upload & Paste Handler
+// ==========================================
+
+function handleFileUpload(file) {
+    if (!file || !db.activeRoom) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const isImage = file.type.startsWith('image/');
+        const isVideo = file.type.startsWith('video/');
+        const isAudio = file.type.startsWith('audio/');
+
+        const mediaObj = {
+            id: generateId(),
+            type: (isImage || isVideo || isAudio) ? 'media' : 'file',
+            fileName: file.name || (isImage ? `image_${Date.now()}.png` : 'file'),
+            fileSize: file.size || 0,
+            fileType: file.type || 'application/octet-stream',
+            data: e.target.result,
+            timestamp: getCurrentTimeStr(),
+            updatedAt: Date.now()
+        };
+
+        if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
+        db.rooms[db.activeRoom].push(mediaObj);
+        saveData();
+        renderMessages();
+        runGistSync(true);
+    };
+
+    reader.readAsDataURL(file);
+}
+
+// ==========================================
+// Modals & Menu Actions
+// ==========================================
+
+function openContextMenu(e, index, msg) {
+    targetMessageData = { index, msg };
+    const menu = document.getElementById('message-context-menu');
+    const editBtn = document.getElementById('menu-edit-btn');
+    if (!menu) return;
+
+    if (msg.type === 'media' || msg.type === 'file') {
+        if (editBtn) editBtn.classList.add('hidden');
+    } else {
+        if (editBtn) editBtn.classList.remove('hidden');
+    }
+    menu.classList.remove('hidden');
+
+    let x = e.clientX || (e.pageX || 100);
+    let y = e.clientY || (e.pageY || 100);
+    if (x + 150 > window.innerWidth) x = window.innerWidth - 160;
+    if (y + 140 > window.innerHeight) y = window.innerHeight - 150;
+
+    menu.style.left = `${Math.max(10, x)}px`;
+    menu.style.top = `${Math.max(10, y)}px`;
+}
+
+function hideContextMenu() {
+    const menu = document.getElementById('message-context-menu');
+    if (menu) menu.classList.add('hidden');
+    targetMessageData = null;
+}
+
 function openFolderConfigModal(folderName) {
     const modal = document.getElementById('folder-modal');
     const title = document.getElementById('folder-modal-title');
     const body = document.getElementById('folder-modal-body');
+    if (!modal || !title || !body) return;
 
     title.textContent = `Folder: ${folderName}`;
     body.innerHTML = `
@@ -363,6 +456,7 @@ function openMoveRoomModal() {
     const body = document.getElementById('folder-modal-body');
     const room = db.activeRoom;
     const currentFolder = db.roomFolders ? (db.roomFolders[room] || null) : null;
+    if (!modal || !title || !body) return;
 
     title.textContent = `Move "${room}" to Folder`;
     let html = `<div class="folder-action-list">`;
@@ -397,7 +491,8 @@ window.assignRoomToFolder = function(room, folder) {
     saveData();
     renderRooms();
     renderMessages();
-    document.getElementById('folder-modal').classList.add('hidden');
+    const modal = document.getElementById('folder-modal');
+    if (modal) modal.classList.add('hidden');
     runGistSync(true);
 };
 
@@ -407,6 +502,7 @@ function openRoomActionsMenu() {
     const modal = document.getElementById('folder-modal');
     const title = document.getElementById('folder-modal-title');
     const body = document.getElementById('folder-modal-body');
+    if (!modal || !title || !body) return;
 
     title.textContent = `Chat Settings: ${room}`;
     body.innerHTML = `
@@ -455,13 +551,19 @@ function openRoomActionsMenu() {
     modal.classList.remove('hidden');
 }
 
-// Multi-Select Controllers
+// ==========================================
+// Multi-Selection Logic
+// ==========================================
+
 function enterSelectionMode(initialMsgId) {
     isSelectionMode = true;
     selectedMessageIds.clear();
     if (initialMsgId) selectedMessageIds.add(initialMsgId);
-    document.getElementById('chat-header').classList.add('hidden');
-    document.getElementById('selection-header').classList.remove('hidden');
+    
+    const chatHeader = document.getElementById('chat-header');
+    const selectHeader = document.getElementById('selection-header');
+    if (chatHeader) chatHeader.classList.add('hidden');
+    if (selectHeader) selectHeader.classList.remove('hidden');
     updateSelectionCounter();
     renderMessages();
 }
@@ -469,8 +571,10 @@ function enterSelectionMode(initialMsgId) {
 function exitSelectionMode() {
     isSelectionMode = false;
     selectedMessageIds.clear();
-    document.getElementById('selection-header').classList.add('hidden');
-    document.getElementById('chat-header').classList.remove('hidden');
+    const chatHeader = document.getElementById('chat-header');
+    const selectHeader = document.getElementById('selection-header');
+    if (selectHeader) selectHeader.classList.add('hidden');
+    if (chatHeader) chatHeader.classList.remove('hidden');
     renderMessages();
 }
 
@@ -508,34 +612,10 @@ function deleteSelectedMessages() {
     }
 }
 
-// Context Menu
-function openContextMenu(e, index, msg) {
-    targetMessageData = { index, msg };
-    const menu = document.getElementById('message-context-menu');
-    const editBtn = document.getElementById('menu-edit-btn');
-    if (msg.type === 'media') {
-        editBtn.classList.add('hidden');
-    } else {
-        editBtn.classList.remove('hidden');
-    }
-    menu.classList.remove('hidden');
+// ==========================================
+// Sync & Database Conflict Merger
+// ==========================================
 
-    let x = e.clientX || (e.pageX || 100);
-    let y = e.clientY || (e.pageY || 100);
-    if (x + 150 > window.innerWidth) x = window.innerWidth - 160;
-    if (y + 140 > window.innerHeight) y = window.innerHeight - 150;
-
-    menu.style.left = `${Math.max(10, x)}px`;
-    menu.style.top = `${Math.max(10, y)}px`;
-}
-
-function hideContextMenu() {
-    const menu = document.getElementById('message-context-menu');
-    if (menu) menu.classList.add('hidden');
-    targetMessageData = null;
-}
-
-// Conflict-Free Merge
 function mergeDatabases(local, remote) {
     const deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
     const deletedFolders = new Set([...(local.deletedFolders || []), ...(remote.deletedFolders || [])]);
@@ -572,8 +652,8 @@ function mergeDatabases(local, remote) {
 
             if (deleted.has(msgObj.id)) return;
 
-            const contentKey = msgObj.type === 'media' 
-                ? `media_${msgObj.fileType}_${(msgObj.data || '').length}_${msgObj.timestamp || ''}` 
+            const contentKey = (msgObj.type === 'media' || msgObj.type === 'file')
+                ? `file_${msgObj.fileName || ''}_${(msgObj.data || '').length}_${msgObj.timestamp || ''}` 
                 : `text_${msgObj.text || ''}_${msgObj.timestamp || ''}`;
 
             if (!map.has(contentKey)) {
@@ -689,57 +769,80 @@ function startAutoSync() {
     autoSyncInterval = setInterval(() => runGistSync(true), 300000);
 }
 
-function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-function getFileIcon(fileName, fileType) {
-    const ext = (fileName.split('.').pop() || '').toLowerCase();
-    if (['py', 'js', 'html', 'css', 'cpp', 'c', 'java', 'ts', 'json', 'sh', 'sql'].includes(ext)) return '📄';
-    if (['ppt', 'pptx'].includes(ext)) return '📊';
-    if (['doc', 'docx', 'txt', 'md', 'rtf'].includes(ext)) return '📝';
-    if (['xls', 'xlsx', 'csv'].includes(ext)) return '📈';
-    if (['pdf'].includes(ext)) return '📕';
-    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜️';
-    if (fileType.startsWith('audio/')) return '🎵';
-    return '📁';
-}
-
-function handleFileUpload(file) {
-    if (!file || !db.activeRoom) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const isImage = file.type.startsWith('image/');
-        const isVideo = file.type.startsWith('video/');
-        const isAudio = file.type.startsWith('audio/');
-
-        const mediaObj = {
-            id: generateId(),
-            type: (isImage || isVideo || isAudio) ? 'media' : 'file',
-            fileName: file.name || (isImage ? `image_${Date.now()}.png` : 'file'),
-            fileSize: file.size || 0,
-            fileType: file.type || 'application/octet-stream',
-            data: e.target.result,
-            timestamp: getCurrentTimeStr(),
-            updatedAt: Date.now()
-        };
-
-        if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-        db.rooms[db.activeRoom].push(mediaObj);
-        saveData();
-        renderMessages();
-        runGistSync(true);
-    };
-
-    reader.readAsDataURL(file);
-}
+// ==========================================
+// Event Listeners Registration
+// ==========================================
 
 function attachEventListeners() {
+    const backBtn = document.getElementById('back-btn');
+    if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
+
+    const roomOptionsBtn = document.getElementById('room-options-btn');
+    if (roomOptionsBtn) roomOptionsBtn.onclick = openRoomActionsMenu;
+
+    const closeFolderBtn = document.getElementById('close-folder-modal-btn');
+    if (closeFolderBtn) {
+        closeFolderBtn.onclick = () => {
+            const folderModal = document.getElementById('folder-modal');
+            if (folderModal) folderModal.classList.add('hidden');
+        };
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#message-context-menu')) hideContextMenu();
+    });
+
+    const menuEditBtn = document.getElementById('menu-edit-btn');
+    if (menuEditBtn) {
+        menuEditBtn.onclick = () => {
+            if (!targetMessageData) return;
+            const { msg } = targetMessageData;
+            hideContextMenu();
+            const newText = prompt("Edit your message:", msg.text);
+            if (newText !== null && newText.trim() !== '') {
+                msg.text = newText.trim();
+                msg.edited = true;
+                msg.updatedAt = Date.now();
+                saveData();
+                renderMessages();
+                runGistSync(true);
+            }
+        };
+    }
+
+    const menuDeleteBtn = document.getElementById('menu-delete-btn');
+    if (menuDeleteBtn) {
+        menuDeleteBtn.onclick = () => {
+            if (!targetMessageData) return;
+            const { index, msg } = targetMessageData;
+            hideContextMenu();
+            if (confirm("Delete this message?")) {
+                if (!db.deleted) db.deleted = [];
+                db.deleted.push(msg.id);
+                db.rooms[db.activeRoom].splice(index, 1);
+                saveData();
+                renderMessages();
+                runGistSync(true);
+            }
+        };
+    }
+
+    const menuSelectBtn = document.getElementById('menu-select-btn');
+    if (menuSelectBtn) {
+        menuSelectBtn.onclick = () => {
+            if (!targetMessageData) return;
+            const { msg } = targetMessageData;
+            hideContextMenu();
+            enterSelectionMode(msg.id);
+        };
+    }
+
+    const cancelSelectBtn = document.getElementById('cancel-selection-btn');
+    if (cancelSelectBtn) cancelSelectBtn.onclick = exitSelectionMode;
+
+    const deleteSelectBtn = document.getElementById('delete-selected-btn');
+    if (deleteSelectBtn) deleteSelectBtn.onclick = deleteSelectedMessages;
+
     const themeSelect = document.getElementById('theme-select');
     if (themeSelect) {
         themeSelect.onchange = (e) => {
@@ -747,7 +850,76 @@ function attachEventListeners() {
         };
     }
 
-// File Attachment Button
+    const addFolderBtn = document.getElementById('add-folder-btn');
+    if (addFolderBtn) {
+        addFolderBtn.onclick = () => {
+            const folderName = prompt("Enter new folder name (e.g. Work, Notes, Spotify):");
+            if (folderName && folderName.trim()) {
+                const cleanName = folderName.trim();
+                if (!db.folders) db.folders = [];
+                if (!db.folders.includes(cleanName)) {
+                    db.folders.push(cleanName);
+                    if (db.deletedFolders) {
+                        db.deletedFolders = db.deletedFolders.filter(df => df !== cleanName);
+                    }
+                    saveData();
+                    renderRooms();
+                    runGistSync(true);
+                } else {
+                    alert("Folder already exists.");
+                }
+            }
+        };
+    }
+
+    const addRoomBtn = document.getElementById('add-room-btn');
+    if (addRoomBtn) {
+        addRoomBtn.onclick = () => {
+            const name = prompt("Enter new chat category name:");
+            if (name && name.trim()) {
+                const clean = name.trim();
+                if (!db.rooms[clean]) {
+                    db.rooms[clean] = []; 
+                    db.activeRoom = clean; 
+                    saveData(); 
+                    renderRooms(); 
+                    renderMessages(); 
+                    document.getElementById('app').classList.add('show-chat');
+                    runGistSync(true);
+                }
+            }
+        };
+    }
+
+    // Sync Modal
+    const syncModal = document.getElementById('sync-modal');
+    const syncSettingsBtn = document.getElementById('sync-settings-btn');
+    if (syncSettingsBtn && syncModal) syncSettingsBtn.onclick = () => syncModal.classList.remove('hidden');
+
+    const closeModalBtn = document.getElementById('close-modal-btn');
+    if (closeModalBtn && syncModal) closeModalBtn.onclick = () => syncModal.classList.add('hidden');
+
+    const saveSyncBtn = document.getElementById('save-sync-btn');
+    if (saveSyncBtn) {
+        saveSyncBtn.onclick = () => {
+            const token = (document.getElementById('gh-token-input')?.value || '').trim();
+            const gistId = (document.getElementById('gist-id-input')?.value || '').trim();
+            const theme = document.getElementById('theme-select')?.value || 'default';
+            
+            localStorage.setItem('gh_token', token);
+            localStorage.setItem('gist_id', gistId);
+            applyTheme(theme);
+            
+            const statusEl = document.getElementById('sync-status');
+            if (statusEl) statusEl.textContent = "Settings saved!";
+            runGistSync(false);
+        };
+    }
+
+    const runSyncBtn = document.getElementById('run-sync-btn');
+    if (runSyncBtn) runSyncBtn.onclick = () => runGistSync(false);
+
+    // Media & File Handling
     const mediaInput = document.getElementById('media-input');
     const attachBtn = document.getElementById('attach-btn');
     if (attachBtn && mediaInput) {
@@ -762,7 +934,7 @@ function attachEventListeners() {
     // Clipboard Paste Listener (Ctrl+V / Paste for screenshots, files, and images)
     window.addEventListener('paste', (e) => {
         if (!db.activeRoom) return;
-        const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        const items = (e.clipboardData || window.clipboardData)?.items || [];
         for (let i = 0; i < items.length; i++) {
             if (items[i].kind === 'file') {
                 const file = items[i].getAsFile();
@@ -775,155 +947,13 @@ function attachEventListeners() {
         }
     });
 
-    document.getElementById('save-sync-btn').onclick = () => {
-        const token = document.getElementById('gh-token-input').value.trim();
-        const gistId = document.getElementById('gist-id-input').value.trim();
-        const theme = document.getElementById('theme-select').value;
-        
-        localStorage.setItem('gh_token', token);
-        localStorage.setItem('gist_id', gistId);
-        applyTheme(theme);
-        
-        document.getElementById('sync-status').textContent = "Settings saved!";
-        runGistSync(false);
-    };
-    const backBtn = document.getElementById('back-btn');
-    if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
-
-    const roomOptionsBtn = document.getElementById('room-options-btn');
-    if (roomOptionsBtn) roomOptionsBtn.onclick = openRoomActionsMenu;
-
-    document.getElementById('close-folder-modal-btn').onclick = () => {
-        document.getElementById('folder-modal').classList.add('hidden');
-    };
-
-    document.addEventListener('click', (e) => {
-        if (!e.target.closest('#message-context-menu')) hideContextMenu();
-    });
-
-    document.getElementById('menu-edit-btn').onclick = () => {
-        if (!targetMessageData) return;
-        const { msg } = targetMessageData;
-        hideContextMenu();
-        const newText = prompt("Edit your message:", msg.text);
-        if (newText !== null && newText.trim() !== '') {
-            msg.text = newText.trim();
-            msg.edited = true;
-            msg.updatedAt = Date.now();
-            saveData();
-            renderMessages();
-            runGistSync(true);
-        }
-    };
-
-    document.getElementById('menu-delete-btn').onclick = () => {
-        if (!targetMessageData) return;
-        const { index, msg } = targetMessageData;
-        hideContextMenu();
-        if (confirm("Delete this message?")) {
-            if (!db.deleted) db.deleted = [];
-            db.deleted.push(msg.id);
-            db.rooms[db.activeRoom].splice(index, 1);
-            saveData();
-            renderMessages();
-            runGistSync(true);
-        }
-    };
-
-    document.getElementById('menu-select-btn').onclick = () => {
-        if (!targetMessageData) return;
-        const { msg } = targetMessageData;
-        hideContextMenu();
-        enterSelectionMode(msg.id);
-    };
-
-    document.getElementById('cancel-selection-btn').onclick = exitSelectionMode;
-    document.getElementById('delete-selected-btn').onclick = deleteSelectedMessages;
-
-    document.getElementById('add-folder-btn').onclick = () => {
-        const folderName = prompt("Enter new folder name (e.g. Work, Notes, Spotify):");
-        if (folderName && folderName.trim()) {
-            const cleanName = folderName.trim();
-            if (!db.folders) db.folders = [];
-            if (!db.folders.includes(cleanName)) {
-                db.folders.push(cleanName);
-                if (db.deletedFolders) {
-                    db.deletedFolders = db.deletedFolders.filter(df => df !== cleanName);
-                }
-                saveData();
-                renderRooms();
-                runGistSync(true);
-            } else {
-                alert("Folder already exists.");
-            }
-        }
-    };
-
-    document.getElementById('add-room-btn').onclick = () => {
-        const name = prompt("Enter new chat category name:");
-        if (name && name.trim()) {
-            const clean = name.trim();
-            if (!db.rooms[clean]) {
-                db.rooms[clean] = []; 
-                db.activeRoom = clean; 
-                saveData(); 
-                renderRooms(); 
-                renderMessages(); 
-                document.getElementById('app').classList.add('show-chat');
-                runGistSync(true);
-            }
-        }
-    };
-
-    // Sync Modal
-    const modal = document.getElementById('sync-modal');
-    document.getElementById('sync-settings-btn').onclick = () => modal.classList.remove('hidden');
-    document.getElementById('close-modal-btn').onclick = () => modal.classList.add('hidden');
-
-    document.getElementById('save-sync-btn').onclick = () => {
-        const token = document.getElementById('gh-token-input').value.trim();
-        const gistId = document.getElementById('gist-id-input').value.trim();
-        localStorage.setItem('gh_token', token);
-        localStorage.setItem('gist_id', gistId);
-        document.getElementById('sync-status').textContent = "Credentials saved locally!";
-        runGistSync(false);
-    };
-
-    document.getElementById('run-sync-btn').onclick = () => runGistSync(false);
-
-    // Media & Form Handling
-    const mediaInput = document.getElementById('media-input');
-    const attachBtn = document.getElementById('attach-btn');
-    if (attachBtn && mediaInput) {
-        attachBtn.onclick = () => mediaInput.click();
-        mediaInput.onchange = () => {
-            const file = mediaInput.files[0]; if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const mediaObj = { 
-                    id: generateId(),
-                    type: 'media', 
-                    fileType: file.type, 
-                    data: e.target.result, 
-                    timestamp: getCurrentTimeStr(),
-                    updatedAt: Date.now()
-                };
-                if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-                db.rooms[db.activeRoom].push(mediaObj); 
-                saveData(); 
-                renderMessages();
-                runGistSync(true);
-            };
-            reader.readAsDataURL(file); 
-            mediaInput.value = '';
-        };
-    }
-
+    // Chat Message Form
     const messageForm = document.getElementById('message-form');
     if (messageForm) {
         messageForm.onsubmit = (e) => {
             e.preventDefault();
-            const input = document.getElementById('message-input'); if (!input) return;
+            const input = document.getElementById('message-input');
+            if (!input) return;
             const text = input.value.trim();
             if (text && db.activeRoom) {
                 const textObj = { 
@@ -945,4 +975,6 @@ function attachEventListeners() {
 }
 
 window.onload = initApp;
-if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').catch(() => {}); }
+if ('serviceWorker' in navigator) { 
+    navigator.serviceWorker.register('sw.js').catch(() => {}); 
+}
