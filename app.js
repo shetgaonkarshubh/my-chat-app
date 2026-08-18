@@ -17,7 +17,28 @@ function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
 
+function applyTheme(themeName) {
+    if (!themeName || themeName === 'default') {
+        document.documentElement.removeAttribute('data-theme');
+    } else {
+        document.documentElement.setAttribute('data-theme', themeName);
+    }
+    localStorage.setItem('app_theme', themeName || 'default');
+}
+
+function loadSavedTheme() {
+    const savedTheme = localStorage.getItem('app_theme') || 'default';
+    applyTheme(savedTheme);
+    const themeSelect = document.getElementById('theme-select');
+    if (themeSelect) themeSelect.value = savedTheme;
+}
+
 function initApp() {
+    loadSavedTheme();
+    if (typeof localforage === 'undefined') {
+        setTimeout(initApp, 100);
+        return;
+    }
     if (typeof localforage === 'undefined') {
         setTimeout(initApp, 100);
         return;
@@ -622,6 +643,25 @@ function startAutoSync() {
 }
 
 function attachEventListeners() {
+    const themeSelect = document.getElementById('theme-select');
+    if (themeSelect) {
+        themeSelect.onchange = (e) => {
+            applyTheme(e.target.value);
+        };
+    }
+
+    document.getElementById('save-sync-btn').onclick = () => {
+        const token = document.getElementById('gh-token-input').value.trim();
+        const gistId = document.getElementById('gist-id-input').value.trim();
+        const theme = document.getElementById('theme-select').value;
+        
+        localStorage.setItem('gh_token', token);
+        localStorage.setItem('gist_id', gistId);
+        applyTheme(theme);
+        
+        document.getElementById('sync-status').textContent = "Settings saved!";
+        runGistSync(false);
+    };
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
 

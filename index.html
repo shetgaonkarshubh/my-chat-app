@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Self Chat</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="style.css?v=3">
+    <link rel="stylesheet" href="style.css?v=4">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Self Chat">
@@ -18,13 +18,12 @@
                 <div class="header-actions">
                     <button id="add-folder-btn" title="Create Folder">📁+</button>
                     <button id="add-room-btn" title="Create Chat">+</button>
-                    <button id="sync-settings-btn" title="Sync Settings">⚙️</button>
+                    <button id="sync-settings-btn" title="Settings">⚙️</button>
                 </div>
             </header>
             <ul id="room-list"></ul>
         </aside>
         <main id="chat-area">
-            <!-- Normal Chat Header -->
             <header id="chat-header">
                 <button id="back-btn">←</button>
                 <div class="header-title-wrap">
@@ -34,7 +33,6 @@
                 <button id="room-options-btn" title="Chat Settings">⋮</button>
             </header>
 
-            <!-- Selection Mode Header -->
             <header id="selection-header" class="hidden">
                 <div class="selection-info">
                     <button id="cancel-selection-btn">✕</button>
@@ -54,32 +52,14 @@
         </main>
     </div>
 
-    <!-- Message Context Dropdown Menu -->
+    <!-- Dropdown Menu -->
     <div id="message-context-menu" class="context-menu hidden">
         <button id="menu-edit-btn">✏️ Edit</button>
         <button id="menu-select-btn">☑️ Select</button>
         <button id="menu-delete-btn" class="menu-danger">🗑️ Delete</button>
     </div>
 
-    <!-- Sync Settings Modal -->
-    <div id="sync-modal" class="modal hidden">
-        <div class="modal-content">
-            <h3>GitHub Gist Sync</h3>
-            <label for="gh-token-input">GitHub Token:</label>
-            <input type="password" id="gh-token-input" placeholder="ghp_xxxxxxxxxxxx">
-            
-            <label for="gist-id-input">Gist ID (leave blank to auto-create):</label>
-            <input type="text" id="gist-id-input" placeholder="Auto-generated on first sync">
-            
-            <div class="modal-actions">
-                <button id="save-sync-btn">Save Credentials</button>
-                <button id="run-sync-btn">Sync Now 🔄</button>
-                <button id="close-modal-btn">Close</button>
-            </div>
-            <p id="sync-status"></p>
-        </div>
-    </div>
-    <!-- Folder Management & Assignment Modal -->
+    <!-- Folder Action Modal -->
     <div id="folder-modal" class="modal hidden">
         <div class="modal-content">
             <h3 id="folder-modal-title">Folder Settings</h3>
@@ -89,7 +69,38 @@
             </div>
         </div>
     </div>
+
+    <!-- Settings & Sync Modal -->
+    <div id="sync-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>App Settings</h3>
+            
+            <label for="theme-select">🎨 Color Theme:</label>
+            <select id="theme-select">
+                <option value="default">Classic (Teal & Grey)</option>
+                <option value="black-red">1. Black & Red</option>
+                <option value="blue">2. Light & Dark Blue</option>
+                <option value="yellow-orange">3. Yellow & Orange</option>
+                <option value="pink-purple">4. Pink & Purple</option>
+                <option value="black-white">5. Black & White (OLED)</option>
+            </select>
+
+            <label for="gh-token-input" style="margin-top: 8px;">GitHub Token:</label>
+            <input type="password" id="gh-token-input" placeholder="ghp_xxxxxxxxxxxx">
+            
+            <label for="gist-id-input">Gist ID (leave blank to auto-create):</label>
+            <input type="text" id="gist-id-input" placeholder="Auto-generated on first sync">
+            
+            <div class="modal-actions">
+                <button id="save-sync-btn">Save Settings</button>
+                <button id="run-sync-btn">Sync Now 🔄</button>
+                <button id="close-modal-btn">Close</button>
+            </div>
+            <p id="sync-status"></p>
+        </div>
+    </div>
+
     <script src="localforage.min.js"></script>
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
 </body>
 </html>
