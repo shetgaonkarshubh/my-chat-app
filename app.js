@@ -713,13 +713,12 @@ async function runGistSync(isSilent = false) {
                 if (fileObj) {
                     let content = fileObj.content;
 
-                    // If GitHub truncated the file (>1MB), fetch the full file via raw_url
+                    // If truncated (>1MB), fetch raw_url WITHOUT auth headers to prevent CORS errors
                     if (fileObj.truncated && fileObj.raw_url) {
-                        const rawRes = await fetch(`${fileObj.raw_url}?t=${Date.now()}`, {
-                            headers: { 'Authorization': `Bearer ${token}` },
+                        const rawRes = await fetch(`${fileObj.raw_url}&t=${Date.now()}`, {
                             cache: 'no-store'
                         });
-                        if (!rawRes.ok) throw new Error("Failed to fetch full raw Gist content");
+                        if (!rawRes.ok) throw new Error(`Failed to fetch raw file (${rawRes.status})`);
                         content = await rawRes.text();
                     }
 
