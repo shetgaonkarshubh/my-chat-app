@@ -708,14 +708,28 @@ async function runGistSync(isSilent = false) {
             if (res.ok) {
                 const data = await res.json();
                 const fileKey = Object.keys(data.files || {})[0];
-                const content = fileKey ? data.files[fileKey]?.content : null;
+                const fileObj = fileKey ? data.files[fileKey] : null;
 
-                if (content) {
-                    const remoteDb = JSON.parse(content);
-                    db = mergeDatabases(db, remoteDb);
-                    saveData();
-                    renderRooms();
-                    renderMessages();
+                if (fileObj) {
+                    let content = fileObj.content;
+
+                    // If GitHub truncated the file (>1MB), fetch the full file via raw_url
+                    if (fileObj.truncated && fileObj.raw_url) {
+                        const rawRes = await fetch(`${fileObj.raw_url}?t=${Date.now()}`, {
+                            headers: { 'Authorization': `Bearer ${token}` },
+                            cache: 'no-store'
+                        });
+                        if (!rawRes.ok) throw new Error("Failed to fetch full raw Gist content");
+                        content = await rawRes.text();
+                    }
+
+                    if (content) {
+                        const remoteDb = JSON.parse(content);
+                        db = mergeDatabases(db, remoteDb);
+                        saveData();
+                        renderRooms();
+                        renderMessages();
+                    }
                 }
             }
         }
