@@ -12,6 +12,60 @@ let autoSyncInterval = null;
 let isSelectionMode = false;
 let selectedMessageIds = new Set();
 let targetMessageData = null;
+let toastTimeout = null;
+
+// ==========================================
+// Toast & Clipboard Helpers
+// ==========================================
+
+function showToast(message = "Message copied") {
+    const toast = document.getElementById('toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.remove('hidden');
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 2000);
+}
+
+function fallbackCopy(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+        document.execCommand('copy');
+        showToast("Message copied");
+    } catch (err) {
+        console.error('Fallback copy failed', err);
+    }
+    document.body.removeChild(textArea);
+}
+
+function copyMessageText(msg) {
+    if (!msg) return;
+    const textToCopy = (msg.type === 'file' || msg.type === 'media') 
+        ? (msg.fileName || msg.data || '') 
+        : (msg.text || '');
+    
+    if (!textToCopy) return;
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            showToast("Message copied");
+        }).catch(() => fallbackCopy(textToCopy));
+    } else {
+        fallbackCopy(textToCopy);
+    }
+}
+
+// ==========================================
+// General Utilities
+// ==========================================
 
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
@@ -58,6 +112,10 @@ function loadSavedTheme() {
     if (themeSelect) themeSelect.value = savedTheme;
 }
 
+// ==========================================
+// Initialization & Persistence
+// ==========================================
+
 function initApp() {
     loadSavedTheme();
 
@@ -80,7 +138,7 @@ function initApp() {
         if (!db.collapsedFolders) db.collapsedFolders = [];
         
         if (!db.activeRoom || !db.rooms[db.activeRoom]) {
-            db.activeRoom = Object.keys(db.rooms)[0];
+            db.activeRoom = Object.keys(db.rooms)[0] || "General Stuff";
         }
 
         renderRooms(); 
@@ -103,6 +161,10 @@ function saveData() {
         localforage.setItem('self_chat_db', db).catch((err) => console.error("Save failed:", err));
     }
 }
+
+// ==========================================
+// Sidebar & Room Navigation
+// ==========================================
 
 function createRoomElement(roomName, isNested = false) {
     const li = document.createElement('li');
@@ -190,6 +252,10 @@ function renderRooms() {
     });
 }
 
+// ==========================================
+// Messages Rendering & Multi-Tap / Triple-Click
+// ==========================================
+
 function renderMessages() {
     const container = document.getElementById('messages-container');
     const title = document.getElementById('current-room-title');
@@ -207,56 +273,6 @@ function renderMessages() {
         }
     }
     title.textContent = db.activeRoom;
-
-    // Desktop Triple Click Handler (e.detail === 3)
-        div.onclick = (e) => {
-            if (isSelectionMode) {
-                e.stopPropagation();
-                toggleMessageSelection(msg.id);
-                return;
-            }
-
-            if (e.detail === 3) {
-                e.preventDefault();
-                e.stopPropagation();
-                hideContextMenu();
-                copyMessageText(msg);
-            }
-        };
-
-        div.ondblclick = (e) => {
-            if (isSelectionMode) return;
-            e.stopPropagation();
-            openContextMenu(e, index, msg);
-        };
-
-        // Mobile Multi-Tap Detector (1=select, 2=menu, 3=copy)
-        let tapCount = 0;
-        let tapTimer = null;
-        div.ontouchend = (e) => {
-            if (isSelectionMode) return;
-            tapCount++;
-            if (tapCount === 1) {
-                tapTimer = setTimeout(() => {
-                    tapCount = 0;
-                }, 400);
-            } else if (tapCount === 2) {
-                clearTimeout(tapTimer);
-                tapTimer = setTimeout(() => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    openContextMenu(e.changedTouches ? e.changedTouches[0] : e, index, msg);
-                    tapCount = 0;
-                }, 250);
-            } else if (tapCount === 3) {
-                clearTimeout(tapTimer);
-                tapCount = 0;
-                e.preventDefault();
-                e.stopPropagation();
-                hideContextMenu();
-                copyMessageText(msg);
-            }
-        };
 
     const currentFolder = db.roomFolders ? db.roomFolders[db.activeRoom] : null;
     if (folderTag) {
@@ -355,36 +371,62 @@ function renderMessages() {
             div.appendChild(timeSpan);
         }
 
+        // Desktop Click / Triple Click
         div.onclick = (e) => {
             if (isSelectionMode) {
                 e.stopPropagation();
                 toggleMessageSelection(msg.id);
+                return;
+            }
+            if (e.detail === 3) {
+                e.preventDefault();
+                e.stopPropagation();
+                hideContextMenu();
+                copyMessageText(msg);
             }
         };
 
+        // Desktop Double Click
         div.ondblclick = (e) => {
             if (isSelectionMode) return;
             e.stopPropagation();
             openContextMenu(e, index, msg);
         };
 
-        let lastTap = 0;
+        // Mobile Multi-Tap Detector
+        let tapCount = 0;
+        let tapTimer = null;
         div.ontouchend = (e) => {
             if (isSelectionMode) return;
-            const currentTime = new Date().getTime();
-            const tapLength = currentTime - lastTap;
-            if (tapLength < 300 && tapLength > 0) {
+            tapCount++;
+            if (tapCount === 1) {
+                tapTimer = setTimeout(() => { tapCount = 0; }, 400);
+            } else if (tapCount === 2) {
+                clearTimeout(tapTimer);
+                tapTimer = setTimeout(() => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openContextMenu(e.changedTouches ? e.changedTouches[0] : e, index, msg);
+                    tapCount = 0;
+                }, 250);
+            } else if (tapCount === 3) {
+                clearTimeout(tapTimer);
+                tapCount = 0;
                 e.preventDefault();
                 e.stopPropagation();
-                openContextMenu(e.changedTouches ? e.changedTouches[0] : e, index, msg);
+                hideContextMenu();
+                copyMessageText(msg);
             }
-            lastTap = currentTime;
         };
 
         container.appendChild(div);
     });
     container.scrollTop = container.scrollHeight;
 }
+
+// ==========================================
+// File Upload & Paste Handling
+// ==========================================
 
 function handleFileUpload(file) {
     if (!file) return;
@@ -416,6 +458,10 @@ function handleFileUpload(file) {
 
     reader.readAsDataURL(file);
 }
+
+// ==========================================
+// Context Menus & Modals
+// ==========================================
 
 function openContextMenu(e, index, msg) {
     targetMessageData = { index, msg };
@@ -459,39 +505,53 @@ function openFolderConfigModal(folderName) {
         </div>
     `;
 
-    document.getElementById('rename-folder-btn').onclick = () => {
-        const newName = prompt("Enter new folder name:", folderName);
-        if (newName && newName.trim() && newName.trim() !== folderName) {
-            const clean = newName.trim();
-            db.folders = db.folders.map(f => f === folderName ? clean : f);
-            Object.keys(db.roomFolders).forEach(r => {
-                if (db.roomFolders[r] === folderName) db.roomFolders[r] = clean;
-            });
-            saveData();
-            renderRooms();
-            renderMessages();
-            modal.classList.add('hidden');
-            runGistSync(true);
-        }
-    };
+    const renameBtn = document.getElementById('rename-folder-btn');
+    if (renameBtn) {
+        renameBtn.onclick = () => {
+            const newName = prompt("Enter new folder name:", folderName);
+            if (newName && newName.trim() && newName.trim() !== folderName) {
+                const clean = newName.trim();
+                db.folders = db.folders.map(f => f === folderName ? clean : f);
+                Object.keys(db.roomFolders).forEach(r => {
+                    if (db.roomFolders[r] === folderName) db.roomFolders[r] = clean;
+                });
+                saveData();
+                renderRooms();
+                renderMessages();
+                modal.classList.add('hidden');
+                runGistSync(true);
+            }
+        };
+    }
 
-    document.getElementById('delete-folder-btn').onclick = () => {
-        if (confirm(`Delete folder "${folderName}"? All chats inside will be moved to Uncategorized.`)) {
-            if (!db.deletedFolders) db.deletedFolders = [];
-            db.deletedFolders.push(folderName);
-            db.folders = db.folders.filter(f => f !== folderName);
-            Object.keys(db.roomFolders).forEach(r => {
-                if (db.roomFolders[r] === folderName) delete db.roomFolders[r];
-            });
-            saveData();
-            renderRooms();
-            renderMessages();
-            modal.classList.add('hidden');
-            runGistSync(true);
-        }
-    };
+    const deleteBtn = document.getElementById('delete-folder-btn');
+    if (deleteBtn) {
+        deleteBtn.onclick = () => {
+            if (confirm(`Delete folder "${folderName}"? All chats inside will be moved to Uncategorized.`)) {
+                if (!db.deletedFolders) db.deletedFolders = [];
+                db.deletedFolders.push(folderName);
+                db.folders = db.folders.filter(f => f !== folderName);
+                Object.keys(db.roomFolders).forEach(r => {
+                    if (db.roomFolders[r] === folderName) delete db.roomFolders[r];
+                });
+                saveData();
+                renderRooms();
+                renderMessages();
+                modal.classList.add('hidden');
+                runGistSync(true);
+            }
+        };
+    }
 
     modal.classList.remove('hidden');
+}
+
+// Change immediate sync calls:
+function queueSync() {
+    if (window.syncDebounceTimer) clearTimeout(window.syncDebounceTimer);
+    window.syncDebounceTimer = setTimeout(() => {
+        runGistSync(true);
+    }, 2500); // Waits 2.5s after your last action before syncing
 }
 
 function openMoveRoomModal() {
@@ -557,44 +617,55 @@ function openRoomActionsMenu() {
         </div>
     `;
 
-    document.getElementById('act-move-room').onclick = openMoveRoomModal;
+    const moveBtn = document.getElementById('act-move-room');
+    if (moveBtn) moveBtn.onclick = openMoveRoomModal;
     
-    document.getElementById('act-rename-room').onclick = () => {
-        modal.classList.add('hidden');
-        const newName = prompt("Enter new name for chat:", room);
-        if (newName && newName.trim() && newName !== room) {
-            const clean = newName.trim();
-            db.rooms[clean] = db.rooms[room];
-            delete db.rooms[room];
-            if (db.roomFolders && db.roomFolders[room]) {
-                db.roomFolders[clean] = db.roomFolders[room];
-                delete db.roomFolders[room];
+    const renameBtn = document.getElementById('act-rename-room');
+    if (renameBtn) {
+        renameBtn.onclick = () => {
+            modal.classList.add('hidden');
+            const newName = prompt("Enter new name for chat:", room);
+            if (newName && newName.trim() && newName !== room) {
+                const clean = newName.trim();
+                db.rooms[clean] = db.rooms[room];
+                delete db.rooms[room];
+                if (db.roomFolders && db.roomFolders[room]) {
+                    db.roomFolders[clean] = db.roomFolders[room];
+                    delete db.roomFolders[room];
+                }
+                db.activeRoom = clean;
+                saveData();
+                renderRooms();
+                renderMessages();
+                runGistSync(true);
             }
-            db.activeRoom = clean;
-            saveData();
-            renderRooms();
-            renderMessages();
-            runGistSync(true);
-        }
-    };
+        };
+    }
 
-    document.getElementById('act-delete-room').onclick = () => {
-        modal.classList.add('hidden');
-        if (confirm(`Permanently delete chat "${room}"?`)) {
-            delete db.rooms[room];
-            if (db.roomFolders) delete db.roomFolders[room];
-            const remaining = Object.keys(db.rooms);
-            db.activeRoom = remaining.length > 0 ? remaining[0] : "General Stuff";
-            if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-            saveData();
-            renderRooms();
-            renderMessages();
-            runGistSync(true);
-        }
-    };
+    const deleteBtn = document.getElementById('act-delete-room');
+    if (deleteBtn) {
+        deleteBtn.onclick = () => {
+            modal.classList.add('hidden');
+            if (confirm(`Permanently delete chat "${room}"?`)) {
+                delete db.rooms[room];
+                if (db.roomFolders) delete db.roomFolders[room];
+                const remaining = Object.keys(db.rooms);
+                db.activeRoom = remaining.length > 0 ? remaining[0] : "General Stuff";
+                if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
+                saveData();
+                renderRooms();
+                renderMessages();
+                runGistSync(true);
+            }
+        };
+    }
 
     modal.classList.remove('hidden');
 }
+
+// ==========================================
+// Multi-Selection Logic
+// ==========================================
 
 function enterSelectionMode(initialMsgId) {
     isSelectionMode = true;
@@ -652,6 +723,10 @@ function deleteSelectedMessages() {
         runGistSync(true);
     }
 }
+
+// ==========================================
+// Conflict-Free Merge & Sync
+// ==========================================
 
 function mergeDatabases(local, remote) {
     if (!remote || typeof remote !== 'object') return local;
@@ -763,7 +838,6 @@ async function runGistSync(isSilent = false) {
                 if (fileObj) {
                     let content = fileObj.content;
 
-                    // If truncated (>1MB), fetch raw_url WITHOUT auth headers to prevent CORS errors
                     if (fileObj.truncated && fileObj.raw_url) {
                         const rawRes = await fetch(`${fileObj.raw_url}&t=${Date.now()}`, {
                             cache: 'no-store'
@@ -818,52 +892,6 @@ async function runGistSync(isSilent = false) {
     }
 }
 
-let toastTimeout = null;
-function showToast(message = "Message copied") {
-    const toast = document.getElementById('toast');
-    if (!toast) return;
-    toast.textContent = message;
-    toast.classList.remove('hidden');
-    if (toastTimeout) clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(() => {
-        toast.classList.add('hidden');
-    }, 2000);
-}
-
-function copyMessageText(msg) {
-    const textToCopy = msg.type === 'file' || msg.type === 'media' 
-        ? (msg.fileName || msg.data || '') 
-        : (msg.text || '');
-    
-    if (!textToCopy) return;
-
-    if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            showToast("Message copied");
-        }).catch(() => fallbackCopy(textToCopy));
-    } else {
-        fallbackCopy(textToCopy);
-    }
-}
-
-function fallbackCopy(text) {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.style.position = "fixed";
-    textArea.style.left = "-999999px";
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-        document.execCommand('copy');
-        showToast("Message copied");
-    } catch (err) {
-        console.error('Fallback copy failed', err);
-    }
-    document.body.removeChild(textArea);
-}
-
-
 function startAutoSync() {
     runGistSync(true);
     document.addEventListener('visibilitychange', () => {
@@ -873,8 +901,11 @@ function startAutoSync() {
     autoSyncInterval = setInterval(() => runGistSync(true), 300000);
 }
 
+// ==========================================
+// Event Listeners Registration
+// ==========================================
+
 function attachEventListeners() {
-    // Navigation & Room Options
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
 
@@ -889,12 +920,10 @@ function attachEventListeners() {
         };
     }
 
-    // Dismiss context menu on outside click
     document.addEventListener('click', (e) => {
         if (!e.target.closest('#message-context-menu')) hideContextMenu();
     });
 
-    // Message Context Menu Actions
     const menuEditBtn = document.getElementById('menu-edit-btn');
     if (menuEditBtn) {
         menuEditBtn.onclick = () => {
@@ -940,14 +969,12 @@ function attachEventListeners() {
         };
     }
 
-    // Selection Header Actions
     const cancelSelectBtn = document.getElementById('cancel-selection-btn');
     if (cancelSelectBtn) cancelSelectBtn.onclick = exitSelectionMode;
 
     const deleteSelectBtn = document.getElementById('delete-selected-btn');
     if (deleteSelectBtn) deleteSelectBtn.onclick = deleteSelectedMessages;
 
-    // Theme Picker
     const themeSelect = document.getElementById('theme-select');
     if (themeSelect) {
         themeSelect.onchange = (e) => {
@@ -955,7 +982,6 @@ function attachEventListeners() {
         };
     }
 
-    // Add Folder Button
     const addFolderBtn = document.getElementById('add-folder-btn');
     if (addFolderBtn) {
         addFolderBtn.onclick = () => {
@@ -978,7 +1004,6 @@ function attachEventListeners() {
         };
     }
 
-    // Add Room / Chat Button
     const addRoomBtn = document.getElementById('add-room-btn');
     if (addRoomBtn) {
         addRoomBtn.onclick = () => {
@@ -999,7 +1024,7 @@ function attachEventListeners() {
         };
     }
 
-    // Settings & Gist Sync Modal
+    // Settings Modal
     const syncModal = document.getElementById('sync-modal');
     const syncSettingsBtn = document.getElementById('sync-settings-btn');
     if (syncSettingsBtn && syncModal) syncSettingsBtn.onclick = () => syncModal.classList.remove('hidden');
@@ -1039,7 +1064,7 @@ function attachEventListeners() {
         };
     }
 
-    // Clipboard Paste Listener (Ctrl+V / Paste for screenshots, files, and images)
+    // Clipboard Paste Listener
     window.addEventListener('paste', (e) => {
         if (!db.activeRoom) return;
         const items = (e.clipboardData || window.clipboardData)?.items || [];
@@ -1055,7 +1080,7 @@ function attachEventListeners() {
         }
     });
 
-    // Auto-resizing Textarea with Enter to send, Shift+Enter for newlines
+    // Textarea & Form Submit
     const textarea = document.getElementById('message-input');
     const messageForm = document.getElementById('message-form');
 
@@ -1103,6 +1128,10 @@ function attachEventListeners() {
         };
     }
 }
+
+// ==========================================
+// Bootstrap
+// ==========================================
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initApp);
