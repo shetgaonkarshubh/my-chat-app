@@ -208,6 +208,56 @@ function renderMessages() {
     }
     title.textContent = db.activeRoom;
 
+    // Desktop Triple Click Handler (e.detail === 3)
+        div.onclick = (e) => {
+            if (isSelectionMode) {
+                e.stopPropagation();
+                toggleMessageSelection(msg.id);
+                return;
+            }
+
+            if (e.detail === 3) {
+                e.preventDefault();
+                e.stopPropagation();
+                hideContextMenu();
+                copyMessageText(msg);
+            }
+        };
+
+        div.ondblclick = (e) => {
+            if (isSelectionMode) return;
+            e.stopPropagation();
+            openContextMenu(e, index, msg);
+        };
+
+        // Mobile Multi-Tap Detector (1=select, 2=menu, 3=copy)
+        let tapCount = 0;
+        let tapTimer = null;
+        div.ontouchend = (e) => {
+            if (isSelectionMode) return;
+            tapCount++;
+            if (tapCount === 1) {
+                tapTimer = setTimeout(() => {
+                    tapCount = 0;
+                }, 400);
+            } else if (tapCount === 2) {
+                clearTimeout(tapTimer);
+                tapTimer = setTimeout(() => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openContextMenu(e.changedTouches ? e.changedTouches[0] : e, index, msg);
+                    tapCount = 0;
+                }, 250);
+            } else if (tapCount === 3) {
+                clearTimeout(tapTimer);
+                tapCount = 0;
+                e.preventDefault();
+                e.stopPropagation();
+                hideContextMenu();
+                copyMessageText(msg);
+            }
+        };
+
     const currentFolder = db.roomFolders ? db.roomFolders[db.activeRoom] : null;
     if (folderTag) {
         folderTag.textContent = currentFolder ? `📁 ${currentFolder}` : '';
@@ -768,6 +818,52 @@ async function runGistSync(isSilent = false) {
     }
 }
 
+let toastTimeout = null;
+function showToast(message = "Message copied") {
+    const toast = document.getElementById('toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.remove('hidden');
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 2000);
+}
+
+function copyMessageText(msg) {
+    const textToCopy = msg.type === 'file' || msg.type === 'media' 
+        ? (msg.fileName || msg.data || '') 
+        : (msg.text || '');
+    
+    if (!textToCopy) return;
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            showToast("Message copied");
+        }).catch(() => fallbackCopy(textToCopy));
+    } else {
+        fallbackCopy(textToCopy);
+    }
+}
+
+function fallbackCopy(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+        document.execCommand('copy');
+        showToast("Message copied");
+    } catch (err) {
+        console.error('Fallback copy failed', err);
+    }
+    document.body.removeChild(textArea);
+}
+
+
 function startAutoSync() {
     runGistSync(true);
     document.addEventListener('visibilitychange', () => {
@@ -778,6 +874,7 @@ function startAutoSync() {
 }
 
 function attachEventListeners() {
+    // Navigation & Room Options
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
 
@@ -792,10 +889,12 @@ function attachEventListeners() {
         };
     }
 
+    // Dismiss context menu on outside click
     document.addEventListener('click', (e) => {
         if (!e.target.closest('#message-context-menu')) hideContextMenu();
     });
 
+    // Message Context Menu Actions
     const menuEditBtn = document.getElementById('menu-edit-btn');
     if (menuEditBtn) {
         menuEditBtn.onclick = () => {
@@ -841,12 +940,14 @@ function attachEventListeners() {
         };
     }
 
+    // Selection Header Actions
     const cancelSelectBtn = document.getElementById('cancel-selection-btn');
     if (cancelSelectBtn) cancelSelectBtn.onclick = exitSelectionMode;
 
     const deleteSelectBtn = document.getElementById('delete-selected-btn');
     if (deleteSelectBtn) deleteSelectBtn.onclick = deleteSelectedMessages;
 
+    // Theme Picker
     const themeSelect = document.getElementById('theme-select');
     if (themeSelect) {
         themeSelect.onchange = (e) => {
@@ -854,6 +955,7 @@ function attachEventListeners() {
         };
     }
 
+    // Add Folder Button
     const addFolderBtn = document.getElementById('add-folder-btn');
     if (addFolderBtn) {
         addFolderBtn.onclick = () => {
@@ -876,6 +978,7 @@ function attachEventListeners() {
         };
     }
 
+    // Add Room / Chat Button
     const addRoomBtn = document.getElementById('add-room-btn');
     if (addRoomBtn) {
         addRoomBtn.onclick = () => {
@@ -896,6 +999,7 @@ function attachEventListeners() {
         };
     }
 
+    // Settings & Gist Sync Modal
     const syncModal = document.getElementById('sync-modal');
     const syncSettingsBtn = document.getElementById('sync-settings-btn');
     if (syncSettingsBtn && syncModal) syncSettingsBtn.onclick = () => syncModal.classList.remove('hidden');
@@ -923,6 +1027,7 @@ function attachEventListeners() {
     const runSyncBtn = document.getElementById('run-sync-btn');
     if (runSyncBtn) runSyncBtn.onclick = () => runGistSync(false);
 
+    // Media & File Attachment Button
     const mediaInput = document.getElementById('media-input');
     const attachBtn = document.getElementById('attach-btn');
     if (attachBtn && mediaInput) {
@@ -934,6 +1039,7 @@ function attachEventListeners() {
         };
     }
 
+    // Clipboard Paste Listener (Ctrl+V / Paste for screenshots, files, and images)
     window.addEventListener('paste', (e) => {
         if (!db.activeRoom) return;
         const items = (e.clipboardData || window.clipboardData)?.items || [];
@@ -949,13 +1055,26 @@ function attachEventListeners() {
         }
     });
 
+    // Auto-resizing Textarea with Enter to send, Shift+Enter for newlines
+    const textarea = document.getElementById('message-input');
     const messageForm = document.getElementById('message-form');
-    if (messageForm) {
+
+    if (textarea && messageForm) {
+        textarea.addEventListener('input', () => {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 140) + 'px';
+        });
+
+        textarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                messageForm.dispatchEvent(new Event('submit', { cancelable: true }));
+            }
+        });
+
         messageForm.onsubmit = (e) => {
             e.preventDefault();
-            const input = document.getElementById('message-input');
-            if (!input) return;
-            const text = input.value.trim();
+            const text = textarea.value.trim();
 
             if (!db.activeRoom || !db.rooms[db.activeRoom]) {
                 const available = Object.keys(db.rooms || {});
@@ -973,7 +1092,9 @@ function attachEventListeners() {
                 };
                 if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
                 db.rooms[db.activeRoom].push(textObj); 
-                input.value = ''; 
+                
+                textarea.value = ''; 
+                textarea.style.height = 'auto';
                 saveData(); 
                 renderRooms();
                 renderMessages();

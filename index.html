@@ -6,12 +6,11 @@
     <title>Self Chat</title>
     <link rel="manifest" href="manifest.json">
     
-    <!-- Modern Geometric & Tech Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="style.css?v=7">
+    <link rel="stylesheet" href="style.css?v=8">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Self Chat">
@@ -53,20 +52,18 @@
             <form id="message-form">
                 <input type="file" id="media-input" style="display: none;">
                 <button type="button" id="attach-btn" title="Attach file">📎</button>
-                <input type="text" id="message-input" placeholder="Type a message or paste an image..." autocomplete="off">
+                <textarea id="message-input" placeholder="Type a message or paste an image... (Shift+Enter for newline)" rows="1"></textarea>
                 <button type="submit">Send</button>
             </form>
         </main>
     </div>
 
-    <!-- Dropdown Menu -->
     <div id="message-context-menu" class="context-menu hidden">
         <button id="menu-edit-btn">✏️ Edit</button>
         <button id="menu-select-btn">☑️ Select</button>
         <button id="menu-delete-btn" class="menu-danger">🗑️ Delete</button>
     </div>
 
-    <!-- Folder Action Modal -->
     <div id="folder-modal" class="modal hidden">
         <div class="modal-content">
             <h3 id="folder-modal-title">Folder Settings</h3>
@@ -77,19 +74,18 @@
         </div>
     </div>
 
-    <!-- Settings & Sync Modal -->
     <div id="sync-modal" class="modal hidden">
         <div class="modal-content">
             <h3>App Settings</h3>
             
             <label for="theme-select">🎨 Color Theme:</label>
             <select id="theme-select">
-                <option value="default">Default: Cyber Emerald</option>
+                <option value="default">Classic (Teal & Clean Grey)</option>
                 <option value="black-red">1. Black & Crimson Red</option>
-                <option value="blue">2. Cobalt & Neon Sky</option>
-                <option value="yellow-orange">3. Sunset Amber & Gold</option>
-                <option value="pink-purple">4. Cyberpunk Sakura (Pink & Purple)</option>
-                <option value="black-white">5. Velvet OLED (Monochrome)</option>
+                <option value="blue">2. Light & Dark Blue</option>
+                <option value="yellow-orange">3. Yellow & Orange</option>
+                <option value="pink-purple">4. Pink & Deep Purple</option>
+                <option value="black-white">5. Velvet OLED (Black & White)</option>
             </select>
 
             <label for="gh-token-input" style="margin-top: 8px;">GitHub Token:</label>
@@ -107,7 +103,9 @@
         </div>
     </div>
 
+    <div id="toast" class="toast hidden">Message copied</div>
+
     <script src="localforage.min.js"></script>
-    <script src="app.js?v=7"></script>
+    <script src="app.js?v=8"></script>
 </body>
 </html>

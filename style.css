@@ -504,6 +504,59 @@ body, html, #app {
     border-color: var(--primary-accent);
 }
 
+/* Ensure linebreaks, code indentations, and multiple lines render properly */
+.message-content { 
+    margin-bottom: 1px; 
+    white-space: pre-wrap; 
+    word-break: break-word;
+}
+
+/* Multi-Line Textarea Styling */
+#message-input { 
+    flex: 1; 
+    padding: 10px 14px; 
+    border: 1px solid var(--border-color); 
+    background: var(--input-bg); 
+    color: var(--input-text); 
+    border-radius: 8px; 
+    outline: none; 
+    font-size: 14px; 
+    resize: none;
+    line-height: 1.4;
+    max-height: 140px;
+    overflow-y: auto;
+    font-family: inherit;
+}
+#message-input:focus {
+    border-color: var(--primary-accent);
+}
+
+/* Toast Notification (Bottom Left) */
+.toast {
+    position: fixed;
+    bottom: 24px;
+    left: 24px;
+    background: rgba(20, 20, 25, 0.92);
+    color: #ffffff;
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    font-size: 13.5px;
+    font-weight: 600;
+    z-index: 9999;
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: none;
+    backdrop-filter: blur(8px);
+}
+
+.toast.hidden {
+    opacity: 0;
+    transform: translateY(12px);
+}
+
 #message-form button[type="submit"] { 
     background: var(--primary-accent); 
     color: var(--primary-text); 
