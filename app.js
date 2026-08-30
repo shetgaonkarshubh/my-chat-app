@@ -371,52 +371,68 @@ function renderMessages() {
             div.appendChild(timeSpan);
         }
 
-        // Desktop Click / Triple Click
-        div.onclick = (e) => {
+        // ==========================================
+        // Unified Click & Multi-Tap Controller
+        // ==========================================
+        let clickTimer = null;
+        let clickCounter = 0;
+
+        function handleMessageInteraction(e, isTouch = false) {
             if (isSelectionMode) {
+                if (!isTouch) {
+                    e.stopPropagation();
+                    toggleMessageSelection(msg.id);
+                }
+                return;
+            }
+
+            clickCounter++;
+
+            if (clickCounter === 1) {
+                clickTimer = setTimeout(() => {
+                    clickCounter = 0;
+                }, 300);
+            } else if (clickCounter === 2) {
+                clearTimeout(clickTimer);
+                clickTimer = setTimeout(() => {
+                    // Exactly 2 clicks -> Open Context Menu
+                    clickCounter = 0;
+                    const coords = isTouch && e.changedTouches ? e.changedTouches[0] : e;
+                    openContextMenu(coords, index, msg);
+                }, 220); // 220ms grace window for the 3rd click
+            } else if (clickCounter >= 3) {
+                // 3 clicks -> Cancel menu and Copy
+                clearTimeout(clickTimer);
+                clickCounter = 0;
+                hideContextMenu();
+                copyMessageText(msg);
+            }
+        }
+
+        // Desktop Click
+        div.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleMessageInteraction(e, false);
+        };
+
+        // Suppress native dblclick to prevent race conditions
+        div.ondblclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        };
+
+        // Mobile Touch End
+        div.ontouchend = (e) => {
+            if (isSelectionMode) {
+                e.preventDefault();
                 e.stopPropagation();
                 toggleMessageSelection(msg.id);
                 return;
             }
-            if (e.detail === 3) {
-                e.preventDefault();
-                e.stopPropagation();
-                hideContextMenu();
-                copyMessageText(msg);
-            }
-        };
-
-        // Desktop Double Click
-        div.ondblclick = (e) => {
-            if (isSelectionMode) return;
+            e.preventDefault();
             e.stopPropagation();
-            openContextMenu(e, index, msg);
-        };
-
-        // Mobile Multi-Tap Detector
-        let tapCount = 0;
-        let tapTimer = null;
-        div.ontouchend = (e) => {
-            if (isSelectionMode) return;
-            tapCount++;
-            if (tapCount === 1) {
-                tapTimer = setTimeout(() => { tapCount = 0; }, 400);
-            } else if (tapCount === 2) {
-                clearTimeout(tapTimer);
-                tapTimer = setTimeout(() => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    openContextMenu(e.changedTouches ? e.changedTouches[0] : e, index, msg);
-                    tapCount = 0;
-                }, 250);
-            } else if (tapCount === 3) {
-                clearTimeout(tapTimer);
-                tapCount = 0;
-                e.preventDefault();
-                e.stopPropagation();
-                hideContextMenu();
-                copyMessageText(msg);
-            }
+            handleMessageInteraction(e, true);
         };
 
         container.appendChild(div);
