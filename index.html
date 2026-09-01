@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="style.css?v=8">
+    <link rel="stylesheet" href="style.css?v=9">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Self Chat">
@@ -56,6 +56,16 @@
                 <button type="submit">Send</button>
             </form>
         </main>
+
+        <aside id="notes-panel">
+            <header class="notes-header">
+                <h3>📌 Quick Notes & To-Do</h3>
+                <span id="notes-save-status">Saved</span>
+            </header>
+            <div class="notes-body">
+                <textarea id="quick-notes-input" placeholder="Write quick notes, paste links, or draft to-dos here... (Auto-saved)"></textarea>
+            </div>
+        </aside>
     </div>
 
     <div id="message-context-menu" class="context-menu hidden">
@@ -106,6 +116,6 @@
     <div id="toast" class="toast hidden">Message copied</div>
 
     <script src="localforage.min.js"></script>
-    <script src="app.js?v=8"></script>
+    <script src="app.js?v=9"></script>
 </body>
 </html>

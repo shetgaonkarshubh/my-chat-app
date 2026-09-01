@@ -119,6 +119,9 @@ function loadSavedTheme() {
 function initApp() {
     loadSavedTheme();
 
+    
+
+
     if (typeof localforage === 'undefined') {
         setTimeout(initApp, 100);
         return;
@@ -128,6 +131,10 @@ function initApp() {
         if (savedData && typeof savedData === 'object') {
             db = Object.assign(db, savedData);
         }
+        // Inside localforage.getItem('self_chat_db').then(...
+        if (!db.notes) db.notes = "";
+        const notesArea = document.getElementById('quick-notes-input');
+        if (notesArea) notesArea.value = db.notes || "";
         if (!db.rooms || Object.keys(db.rooms).length === 0) {
             db.rooms = { "General Stuff": [] };
         }
@@ -745,6 +752,14 @@ function deleteSelectedMessages() {
 // ==========================================
 
 function mergeDatabases(local, remote) {
+    const notesArea = document.getElementById('quick-notes-input');
+        if (notesArea && document.activeElement !== notesArea) {
+            notesArea.value = merged.notes;
+        }
+    merged.notes = (remote.notesUpdated && remote.notesUpdated > (local.notesUpdated || 0)) 
+            ? remote.notes 
+            : (local.notes || remote.notes || "");
+        merged.notesUpdated = Math.max(local.notesUpdated || 0, remote.notesUpdated || 0);
     if (!remote || typeof remote !== 'object') return local;
 
     const deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
@@ -922,6 +937,25 @@ function startAutoSync() {
 // ==========================================
 
 function attachEventListeners() {
+    // Quick Notes Auto-Save Listener
+    const notesInput = document.getElementById('quick-notes-input');
+    const notesStatus = document.getElementById('notes-save-status');
+    let notesTimer = null;
+
+    if (notesInput) {
+        notesInput.addEventListener('input', () => {
+            if (notesStatus) notesStatus.textContent = "Saving...";
+            db.notes = notesInput.value;
+            db.notesUpdated = Date.now();
+            
+            if (notesTimer) clearTimeout(notesTimer);
+            notesTimer = setTimeout(() => {
+                saveData();
+                if (notesStatus) notesStatus.textContent = "Saved";
+                runGistSync(true);
+            }, 1000);
+        });
+    }
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
 
