@@ -5,7 +5,9 @@ let db = {
     folders: [], 
     deletedFolders: [],
     roomFolders: {}, 
-    collapsedFolders: [] 
+    collapsedFolders: [],
+    todos: [],
+    deletedTodos: []
 };
 
 let autoSyncInterval = null;
@@ -113,14 +115,61 @@ function loadSavedTheme() {
 }
 
 // ==========================================
+// To-Do Checklist Rendering
+// ==========================================
+
+function renderTodos() {
+    var list = document.getElementById('todo-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    var todos = db.todos || [];
+    todos.forEach(function(item) {
+        var li = document.createElement('li');
+        li.className = 'todo-item' + (item.done ? ' completed' : '');
+
+        var checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'todo-checkbox';
+        checkbox.checked = !!item.done;
+        checkbox.onchange = function() {
+            item.done = checkbox.checked;
+            item.updatedAt = Date.now();
+            saveData();
+            renderTodos();
+            queueSync();
+        };
+
+        var span = document.createElement('span');
+        span.className = 'todo-text';
+        span.textContent = item.text;
+
+        var delBtn = document.createElement('button');
+        delBtn.className = 'todo-delete-btn';
+        delBtn.innerHTML = '🗑️';
+        delBtn.title = 'Delete task';
+        delBtn.onclick = function() {
+            if (!db.deletedTodos) db.deletedTodos = [];
+            db.deletedTodos.push(item.id);
+            db.todos = db.todos.filter(function(t) { return t.id !== item.id; });
+            saveData();
+            renderTodos();
+            queueSync();
+        };
+
+        li.appendChild(checkbox);
+        li.appendChild(span);
+        li.appendChild(delBtn);
+        list.appendChild(li);
+    });
+}
+
+// ==========================================
 // Initialization & Persistence
 // ==========================================
 
 function initApp() {
     loadSavedTheme();
-
-    
-
 
     if (typeof localforage === 'undefined') {
         setTimeout(initApp, 100);
@@ -131,10 +180,11 @@ function initApp() {
         if (savedData && typeof savedData === 'object') {
             db = Object.assign(db, savedData);
         }
-        // Inside localforage.getItem('self_chat_db').then(...
+        
         if (!db.notes) db.notes = "";
         const notesArea = document.getElementById('quick-notes-input');
         if (notesArea) notesArea.value = db.notes || "";
+
         if (!db.rooms || Object.keys(db.rooms).length === 0) {
             db.rooms = { "General Stuff": [] };
         }
@@ -143,6 +193,8 @@ function initApp() {
         if (!db.deletedFolders) db.deletedFolders = [];
         if (!db.roomFolders) db.roomFolders = {};
         if (!db.collapsedFolders) db.collapsedFolders = [];
+        if (!db.todos) db.todos = [];
+        if (!db.deletedTodos) db.deletedTodos = [];
         
         if (!db.activeRoom || !db.rooms[db.activeRoom]) {
             db.activeRoom = Object.keys(db.rooms)[0] || "General Stuff";
@@ -150,6 +202,7 @@ function initApp() {
 
         renderRooms(); 
         renderMessages(); 
+        renderTodos();
         attachEventListeners();
         loadSyncCredentials();
         startAutoSync();
@@ -157,6 +210,7 @@ function initApp() {
         console.error("LocalForage load error:", err);
         renderRooms(); 
         renderMessages(); 
+        renderTodos();
         attachEventListeners();
         loadSyncCredentials();
         startAutoSync();
@@ -402,13 +456,11 @@ function renderMessages() {
             } else if (clickCounter === 2) {
                 clearTimeout(clickTimer);
                 clickTimer = setTimeout(() => {
-                    // Exactly 2 clicks -> Open Context Menu
                     clickCounter = 0;
                     const coords = isTouch && e.changedTouches ? e.changedTouches[0] : e;
                     openContextMenu(coords, index, msg);
-                }, 220); // 220ms grace window for the 3rd click
+                }, 220);
             } else if (clickCounter >= 3) {
-                // 3 clicks -> Cancel menu and Copy
                 clearTimeout(clickTimer);
                 clickCounter = 0;
                 hideContextMenu();
@@ -416,20 +468,17 @@ function renderMessages() {
             }
         }
 
-        // Desktop Click
         div.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
             handleMessageInteraction(e, false);
         };
 
-        // Suppress native dblclick to prevent race conditions
         div.ondblclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
         };
 
-        // Mobile Touch End
         div.ontouchend = (e) => {
             if (isSelectionMode) {
                 e.preventDefault();
@@ -476,7 +525,7 @@ function handleFileUpload(file) {
         db.rooms[db.activeRoom].push(mediaObj);
         saveData();
         renderMessages();
-        runGistSync(true);
+        queueSync();
     };
 
     reader.readAsDataURL(file);
@@ -542,7 +591,7 @@ function openFolderConfigModal(folderName) {
                 renderRooms();
                 renderMessages();
                 modal.classList.add('hidden');
-                runGistSync(true);
+                queueSync();
             }
         };
     }
@@ -561,7 +610,7 @@ function openFolderConfigModal(folderName) {
                 renderRooms();
                 renderMessages();
                 modal.classList.add('hidden');
-                runGistSync(true);
+                queueSync();
             }
         };
     }
@@ -569,12 +618,11 @@ function openFolderConfigModal(folderName) {
     modal.classList.remove('hidden');
 }
 
-// Change immediate sync calls:
 function queueSync() {
     if (window.syncDebounceTimer) clearTimeout(window.syncDebounceTimer);
     window.syncDebounceTimer = setTimeout(() => {
         runGistSync(true);
-    }, 2500); // Waits 2.5s after your last action before syncing
+    }, 2500);
 }
 
 function openMoveRoomModal() {
@@ -620,7 +668,7 @@ window.assignRoomToFolder = function(room, folder) {
     renderMessages();
     const modal = document.getElementById('folder-modal');
     if (modal) modal.classList.add('hidden');
-    runGistSync(true);
+    queueSync();
 };
 
 function openRoomActionsMenu() {
@@ -660,7 +708,7 @@ function openRoomActionsMenu() {
                 saveData();
                 renderRooms();
                 renderMessages();
-                runGistSync(true);
+                queueSync();
             }
         };
     }
@@ -678,7 +726,7 @@ function openRoomActionsMenu() {
                 saveData();
                 renderRooms();
                 renderMessages();
-                runGistSync(true);
+                queueSync();
             }
         };
     }
@@ -743,7 +791,7 @@ function deleteSelectedMessages() {
         });
         saveData();
         exitSelectionMode();
-        runGistSync(true);
+        queueSync();
     }
 }
 
@@ -756,6 +804,7 @@ function mergeDatabases(local, remote) {
 
     var deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
     var deletedFolders = new Set([...(local.deletedFolders || []), ...(remote.deletedFolders || [])]);
+    var deletedTodos = new Set([...(local.deletedTodos || []), ...(remote.deletedTodos || [])]);
 
     var combinedFolders = new Set([...(local.folders || []), ...(remote.folders || [])]);
     deletedFolders.forEach(function(df) { combinedFolders.delete(df); });
@@ -773,6 +822,20 @@ function mergeDatabases(local, remote) {
         chosenActiveRoom = Array.from(allRooms)[0] || "General Stuff";
     }
 
+    // Merge To-Do items with collision resolution
+    var todoMap = new Map();
+    [...(local.todos || []), ...(remote.todos || [])].forEach(function(item) {
+        if (!item || !item.id || deletedTodos.has(item.id)) return;
+        if (!todoMap.has(item.id)) {
+            todoMap.set(item.id, item);
+        } else {
+            var existing = todoMap.get(item.id);
+            if ((item.updatedAt || 0) > (existing.updatedAt || 0)) {
+                todoMap.set(item.id, item);
+            }
+        }
+    });
+
     var merged = { 
         rooms: {}, 
         activeRoom: chosenActiveRoom,
@@ -781,6 +844,8 @@ function mergeDatabases(local, remote) {
         folders: Array.from(combinedFolders),
         roomFolders: mergedRoomFolders,
         collapsedFolders: local.collapsedFolders || [],
+        todos: Array.from(todoMap.values()),
+        deletedTodos: Array.from(deletedTodos),
         notes: (remote.notesUpdated && remote.notesUpdated > (local.notesUpdated || 0)) 
             ? (remote.notes || "") 
             : (local.notes || remote.notes || ""),
@@ -816,7 +881,6 @@ function mergeDatabases(local, remote) {
         merged.rooms[room] = Array.from(map.values());
     });
 
-    // Safely update notes textarea if not actively being typed in
     var activeNotesEl = document.getElementById('quick-notes-input');
     if (activeNotesEl && document.activeElement !== activeNotesEl) {
         activeNotesEl.value = merged.notes || "";
@@ -894,6 +958,7 @@ async function runGistSync(isSilent = false) {
                         saveData();
                         renderRooms();
                         renderMessages();
+                        renderTodos();
                     }
                 }
             }
@@ -970,10 +1035,51 @@ function attachEventListeners() {
             notesTimer = setTimeout(() => {
                 saveData();
                 if (notesStatus) notesStatus.textContent = "Saved";
-                runGistSync(true);
+                queueSync();
             }, 1000);
         });
     }
+
+    // Interactive To-Do List Submission
+    const todoForm = document.getElementById('todo-form');
+    const todoInput = document.getElementById('todo-input');
+    if (todoForm && todoInput) {
+        todoForm.onsubmit = (e) => {
+            e.preventDefault();
+            const val = todoInput.value.trim();
+            if (!val) return;
+
+            if (!db.todos) db.todos = [];
+            db.todos.unshift({
+                id: generateId(),
+                text: val,
+                done: false,
+                updatedAt: Date.now()
+            });
+
+            todoInput.value = '';
+            saveData();
+            renderTodos();
+            queueSync();
+        };
+    }
+
+    // Mobile Switcher Tabs
+    const tabChats = document.getElementById('mobile-tab-chats');
+    const tabTodos = document.getElementById('mobile-tab-todos');
+    if (tabChats && tabTodos) {
+        tabChats.onclick = () => {
+            tabChats.classList.add('active');
+            tabTodos.classList.remove('active');
+            document.body.classList.remove('show-todos');
+        };
+        tabTodos.onclick = () => {
+            tabTodos.classList.add('active');
+            tabChats.classList.remove('active');
+            document.body.classList.add('show-todos');
+        };
+    }
+
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.onclick = () => document.getElementById('app').classList.remove('show-chat');
 
@@ -1005,7 +1111,7 @@ function attachEventListeners() {
                 msg.updatedAt = Date.now();
                 saveData();
                 renderMessages();
-                runGistSync(true);
+                queueSync();
             }
         };
     }
@@ -1022,7 +1128,7 @@ function attachEventListeners() {
                 db.rooms[db.activeRoom].splice(index, 1);
                 saveData();
                 renderMessages();
-                runGistSync(true);
+                queueSync();
             }
         };
     }
@@ -1064,7 +1170,7 @@ function attachEventListeners() {
                     }
                     saveData();
                     renderRooms();
-                    runGistSync(true);
+                    queueSync();
                 } else {
                     alert("Folder already exists.");
                 }
@@ -1086,13 +1192,12 @@ function attachEventListeners() {
                     renderMessages(); 
                     const appEl = document.getElementById('app');
                     if (appEl) appEl.classList.add('show-chat');
-                    runGistSync(true);
+                    queueSync();
                 }
             }
         };
     }
 
-    // Settings Modal
     const syncModal = document.getElementById('sync-modal');
     const syncSettingsBtn = document.getElementById('sync-settings-btn');
     if (syncSettingsBtn && syncModal) syncSettingsBtn.onclick = () => syncModal.classList.remove('hidden');
@@ -1120,7 +1225,6 @@ function attachEventListeners() {
     const runSyncBtn = document.getElementById('run-sync-btn');
     if (runSyncBtn) runSyncBtn.onclick = () => runGistSync(false);
 
-    // Media & File Attachment Button
     const mediaInput = document.getElementById('media-input');
     const attachBtn = document.getElementById('attach-btn');
     if (attachBtn && mediaInput) {
@@ -1132,7 +1236,6 @@ function attachEventListeners() {
         };
     }
 
-    // Clipboard Paste Listener
     window.addEventListener('paste', (e) => {
         if (!db.activeRoom) return;
         const items = (e.clipboardData || window.clipboardData)?.items || [];
@@ -1148,7 +1251,6 @@ function attachEventListeners() {
         }
     });
 
-    // Textarea & Form Submit
     const textarea = document.getElementById('message-input');
     const messageForm = document.getElementById('message-form');
 
@@ -1191,7 +1293,7 @@ function attachEventListeners() {
                 saveData(); 
                 renderRooms();
                 renderMessages();
-                runGistSync(true);
+                queueSync();
             }
         };
     }
