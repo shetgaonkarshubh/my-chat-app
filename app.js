@@ -855,16 +855,20 @@ async function runGistSync(isSilent = false) {
 
     try {
         if (currentGistId) {
-            var getUrl = 'https://api.github.com/gists/' + currentGistId + '?t=' + Date.now();
+            var getUrl = 'https://api.github.com/gists/' + currentGistId;
             var res = await fetch(getUrl, {
                 headers: { 
-                    'Authorization': 'Bearer ' + token,
+                    'Authorization': 'token ' + token,
                     'Accept': 'application/vnd.github.v3+json'
-                },
-                cache: 'no-store'
+                }
             });
 
-            if (res.status === 401) throw new Error("401 Unauthorized (Check token)");
+            if (res.status === 401 || res.status === 403) {
+                throw new Error("Bad credentials. Recheck your GitHub token.");
+            }
+            if (res.status === 404) {
+                throw new Error("Gist ID not found. Clear Gist ID to recreate.");
+            }
 
             if (res.ok) {
                 var data = await res.json();
@@ -874,12 +878,10 @@ async function runGistSync(isSilent = false) {
                 if (fileObj) {
                     var content = fileObj.content;
 
-                    // Handle truncated files (>1MB) safely without auth headers to bypass CORS
                     if (fileObj.truncated && fileObj.raw_url) {
-                        var rawRes = await fetch(fileObj.raw_url + '&t=' + Date.now(), {
-                            cache: 'no-store'
-                        });
-                        if (!rawRes.ok) throw new Error('Failed to fetch raw file (' + rawRes.status + ')');
+                        var separator = fileObj.raw_url.indexOf('?') === -1 ? '?' : '&';
+                        var rawRes = await fetch(fileObj.raw_url + separator + 'nocache=' + Date.now());
+                        if (!rawRes.ok) throw new Error('Raw fetch failed (' + rawRes.status + ')');
                         content = await rawRes.text();
                     }
 
@@ -897,7 +899,11 @@ async function runGistSync(isSilent = false) {
         var payload = {
             description: "Self Chat Backup DB",
             public: false,
-            files: { "self_chat_db.json": { content: JSON.stringify(db) } }
+            files: { 
+                "self_chat_db.json": { 
+                    content: JSON.stringify(db) 
+                } 
+            }
         };
 
         var syncMethod = currentGistId ? 'PATCH' : 'POST';
@@ -906,14 +912,17 @@ async function runGistSync(isSilent = false) {
         var pushRes = await fetch(syncUrl, {
             method: syncMethod,
             headers: { 
-                'Authorization': 'Bearer ' + token,
+                'Authorization': 'token ' + token,
                 'Content-Type': 'application/json',
                 'Accept': 'application/vnd.github.v3+json'
             },
             body: JSON.stringify(payload)
         });
 
-        if (!pushRes.ok) throw new Error('HTTP ' + pushRes.status);
+        if (!pushRes.ok) {
+            var errJson = await pushRes.json().catch(function() { return {}; });
+            throw new Error(errJson.message || ('HTTP ' + pushRes.status));
+        }
         
         var pushData = await pushRes.json();
         if (pushData && pushData.id) {
