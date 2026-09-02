@@ -798,7 +798,6 @@ function deleteSelectedMessages() {
 // ==========================================
 // Conflict-Free Merge & Sync
 // ==========================================
-
 function mergeDatabases(local, remote) {
     if (!remote || typeof remote !== 'object') return local;
 
@@ -806,6 +805,7 @@ function mergeDatabases(local, remote) {
     var deletedFolders = new Set([...(local.deletedFolders || []), ...(remote.deletedFolders || [])]);
     var deletedTodos = new Set([...(local.deletedTodos || []), ...(remote.deletedTodos || [])]);
 
+    // 1. Merge Folders
     var combinedFolders = new Set([...(local.folders || []), ...(remote.folders || [])]);
     deletedFolders.forEach(function(df) { combinedFolders.delete(df); });
 
@@ -814,6 +814,7 @@ function mergeDatabases(local, remote) {
         if (deletedFolders.has(mergedRoomFolders[r])) delete mergedRoomFolders[r];
     });
 
+    // 2. Merge Rooms
     var allRooms = new Set([...Object.keys(local.rooms || {}), ...Object.keys(remote.rooms || {})]);
     if (allRooms.size === 0) allRooms.add("General Stuff");
 
@@ -822,7 +823,7 @@ function mergeDatabases(local, remote) {
         chosenActiveRoom = Array.from(allRooms)[0] || "General Stuff";
     }
 
-    // Merge To-Do items with collision resolution
+    // 3. Merge To-Dos (Highest timestamp wins; deleted items stay deleted)
     var todoMap = new Map();
     [...(local.todos || []), ...(remote.todos || [])].forEach(function(item) {
         if (!item || !item.id || deletedTodos.has(item.id)) return;
@@ -830,7 +831,7 @@ function mergeDatabases(local, remote) {
             todoMap.set(item.id, item);
         } else {
             var existing = todoMap.get(item.id);
-            if ((item.updatedAt || 0) > (existing.updatedAt || 0)) {
+            if ((item.updatedAt || 0) >= (existing.updatedAt || 0)) {
                 todoMap.set(item.id, item);
             }
         }
@@ -852,6 +853,7 @@ function mergeDatabases(local, remote) {
         notesUpdated: Math.max(local.notesUpdated || 0, remote.notesUpdated || 0)
     };
     
+    // 4. Merge Chat Messages & Photos by unique ID
     allRooms.forEach(function(room) {
         var localMsgs = local.rooms ? (local.rooms[room] || []) : [];
         var remoteMsgs = remote.rooms ? (remote.rooms[room] || []) : [];
@@ -864,16 +866,13 @@ function mergeDatabases(local, remote) {
 
             if (deleted.has(msgObj.id)) return;
 
-            var contentKey = (msgObj.type === 'media' || msgObj.type === 'file')
-                ? ('file_' + (msgObj.fileName || '') + '_' + ((msgObj.data || '').length) + '_' + (msgObj.timestamp || ''))
-                : ('text_' + (msgObj.text || '') + '_' + (msgObj.timestamp || ''));
-
-            if (!map.has(contentKey)) {
-                map.set(contentKey, msgObj);
+            var key = msgObj.id; // Map directly by unique ID to preserve photos
+            if (!map.has(key)) {
+                map.set(key, msgObj);
             } else {
-                var existing = map.get(contentKey);
-                if (msgObj.updatedAt && existing.updatedAt && msgObj.updatedAt > existing.updatedAt) {
-                    map.set(contentKey, msgObj);
+                var existing = map.get(key);
+                if ((msgObj.updatedAt || 0) >= (existing.updatedAt || 0)) {
+                    map.set(key, msgObj);
                 }
             }
         });
@@ -945,6 +944,7 @@ async function runGistSync(isSilent = false) {
                 if (fileObj) {
                     var content = fileObj.content;
 
+                    // Large photo payload (>1MB): fetch complete raw string
                     if (fileObj.truncated && fileObj.raw_url) {
                         var separator = fileObj.raw_url.indexOf('?') === -1 ? '?' : '&';
                         var rawRes = await fetch(fileObj.raw_url + separator + 'nocache=' + Date.now());
