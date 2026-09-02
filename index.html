@@ -56,15 +56,22 @@
                 <button type="submit">Send</button>
             </form>
         </main>
+        <div id="mobile-nav-bar">
+            <button id="mobile-tab-chats" class="mobile-tab active">💬 Chats</button>
+            <button id="mobile-tab-todos" class="mobile-tab">📌 To-Do List</button>
+        </div>
 
         <aside id="notes-panel">
             <header class="notes-header">
-                <h3>📌 Quick Notes & To-Do</h3>
-                <span id="notes-save-status">Saved</span>
+                <h3>📌 To-Do List</h3>
+                <span id="notes-save-status">Synced</span>
             </header>
-            <div class="notes-body">
-                <textarea id="quick-notes-input" placeholder="Write quick notes, paste links, or draft to-dos here... (Auto-saved)"></textarea>
-            </div>
+            
+            <form id="todo-form">
+                <input type="text" id="todo-input" placeholder="+ Add a task and press Enter..." autocomplete="off">
+            </form>
+
+            <ul id="todo-list"></ul>
         </aside>
     </div>
 
