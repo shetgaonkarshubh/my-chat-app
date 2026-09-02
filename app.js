@@ -832,15 +832,19 @@ function loadSyncCredentials() {
 }
 
 async function runGistSync(isSilent = false) {
-    const statusEl = document.getElementById('sync-status');
-    const tokenInput = document.getElementById('gh-token-input');
-    const gistInput = document.getElementById('gist-id-input');
+    var statusEl = document.getElementById('sync-status');
+    var tokenInput = document.getElementById('gh-token-input');
+    var gistInput = document.getElementById('gist-id-input');
     
-    if (tokenInput && tokenInput.value.trim()) localStorage.setItem('gh_token', tokenInput.value.trim());
-    if (gistInput && gistInput.value.trim()) localStorage.setItem('gist_id', gistInput.value.trim());
+    if (tokenInput && tokenInput.value.trim()) {
+        localStorage.setItem('gh_token', tokenInput.value.trim());
+    }
+    if (gistInput && gistInput.value.trim()) {
+        localStorage.setItem('gist_id', gistInput.value.trim());
+    }
 
-    const token = (localStorage.getItem('gh_token') || '').trim();
-    let gistId = (localStorage.getItem('gist_id') || '').trim();
+    var token = (localStorage.getItem('gh_token') || '').trim();
+    var currentGistId = (localStorage.getItem('gist_id') || '').trim();
 
     if (!token) {
         if (statusEl && !isSilent) statusEl.textContent = "Token missing. Set your GitHub Token.";
@@ -850,10 +854,11 @@ async function runGistSync(isSilent = false) {
     if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
 
     try {
-        if (gistId) {
-            const res = await fetch(`https://api.github.com/gists/${gistId}?t=${Date.now()}`, {
+        if (currentGistId) {
+            var getUrl = 'https://api.github.com/gists/' + currentGistId + '?t=' + Date.now();
+            var res = await fetch(getUrl, {
                 headers: { 
-                    'Authorization': `Bearer ${token}`,
+                    'Authorization': 'Bearer ' + token,
                     'Accept': 'application/vnd.github.v3+json'
                 },
                 cache: 'no-store'
@@ -862,23 +867,24 @@ async function runGistSync(isSilent = false) {
             if (res.status === 401) throw new Error("401 Unauthorized (Check token)");
 
             if (res.ok) {
-                const data = await res.json();
-                const fileKey = Object.keys(data.files || {})[0];
-                const fileObj = fileKey ? data.files[fileKey] : null;
+                var data = await res.json();
+                var fileKeys = Object.keys(data.files || {});
+                var fileObj = fileKeys.length > 0 ? data.files[fileKeys[0]] : null;
 
                 if (fileObj) {
-                    let content = fileObj.content;
+                    var content = fileObj.content;
 
+                    // Handle truncated files (>1MB) safely without auth headers to bypass CORS
                     if (fileObj.truncated && fileObj.raw_url) {
-                        const rawRes = await fetch(`${fileObj.raw_url}&t=${Date.now()}`, {
+                        var rawRes = await fetch(fileObj.raw_url + '&t=' + Date.now(), {
                             cache: 'no-store'
                         });
-                        if (!rawRes.ok) throw new Error(`Failed to fetch raw file (${rawRes.status})`);
+                        if (!rawRes.ok) throw new Error('Failed to fetch raw file (' + rawRes.status + ')');
                         content = await rawRes.text();
                     }
 
                     if (content) {
-                        const remoteDb = JSON.parse(content);
+                        var remoteDb = JSON.parse(content);
                         db = mergeDatabases(db, remoteDb);
                         saveData();
                         renderRooms();
@@ -888,38 +894,38 @@ async function runGistSync(isSilent = false) {
             }
         }
 
-        const payload = {
+        var payload = {
             description: "Self Chat Backup DB",
             public: false,
             files: { "self_chat_db.json": { content: JSON.stringify(db) } }
         };
 
-        const method = gistId ? 'PATCH' : 'POST';
-        const url = gistId ? `https://api.github.com/gists/${gistId}` : `https://api.github.com/gists`;
+        var syncMethod = currentGistId ? 'PATCH' : 'POST';
+        var syncUrl = currentGistId ? ('https://api.github.com/gists/' + currentGistId) : 'https://api.github.com/gists';
 
-        const pushRes = await fetch(url, {
-            method: method,
+        var pushRes = await fetch(syncUrl, {
+            method: syncMethod,
             headers: { 
-                'Authorization': `Bearer ${token}`,
+                'Authorization': 'Bearer ' + token,
                 'Content-Type': 'application/json',
                 'Accept': 'application/vnd.github.v3+json'
             },
             body: JSON.stringify(payload)
         });
 
-        if (!pushRes.ok) throw new Error(`HTTP ${pushRes.status}`);
+        if (!pushRes.ok) throw new Error('HTTP ' + pushRes.status);
         
-        const pushData = await pushRes.json();
-        if (pushData.id) {
-            gistId = pushData.id;
-            localStorage.setItem('gist_id', gistId);
-            if (gistInput) gistInput.value = gistId;
+        var pushData = await pushRes.json();
+        if (pushData && pushData.id) {
+            currentGistId = pushData.id;
+            localStorage.setItem('gist_id', currentGistId);
+            if (gistInput) gistInput.value = currentGistId;
         }
 
-        if (statusEl) statusEl.textContent = `Synced (${getCurrentTimeStr()})`;
+        if (statusEl) statusEl.textContent = 'Synced (' + getCurrentTimeStr() + ')';
     } catch (err) {
-        console.error(err);
-        if (statusEl && !isSilent) statusEl.textContent = `Sync failed: ${err.message}`;
+        console.error("Gist sync error:", err);
+        if (statusEl && !isSilent) statusEl.textContent = 'Sync failed: ' + err.message;
     }
 }
 
