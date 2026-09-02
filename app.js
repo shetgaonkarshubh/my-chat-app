@@ -752,65 +752,61 @@ function deleteSelectedMessages() {
 // ==========================================
 
 function mergeDatabases(local, remote) {
-    const notesArea = document.getElementById('quick-notes-input');
-        if (notesArea && document.activeElement !== notesArea) {
-            notesArea.value = merged.notes;
-        }
-    merged.notes = (remote.notesUpdated && remote.notesUpdated > (local.notesUpdated || 0)) 
-            ? remote.notes 
-            : (local.notes || remote.notes || "");
-        merged.notesUpdated = Math.max(local.notesUpdated || 0, remote.notesUpdated || 0);
     if (!remote || typeof remote !== 'object') return local;
 
-    const deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
-    const deletedFolders = new Set([...(local.deletedFolders || []), ...(remote.deletedFolders || [])]);
+    var deleted = new Set([...(local.deleted || []), ...(remote.deleted || [])]);
+    var deletedFolders = new Set([...(local.deletedFolders || []), ...(remote.deletedFolders || [])]);
 
-    const combinedFolders = new Set([...(local.folders || []), ...(remote.folders || [])]);
-    deletedFolders.forEach(df => combinedFolders.delete(df));
+    var combinedFolders = new Set([...(local.folders || []), ...(remote.folders || [])]);
+    deletedFolders.forEach(function(df) { combinedFolders.delete(df); });
 
-    const mergedRoomFolders = { ...(remote.roomFolders || {}), ...(local.roomFolders || {}) };
-    Object.keys(mergedRoomFolders).forEach(r => {
+    var mergedRoomFolders = Object.assign({}, remote.roomFolders || {}, local.roomFolders || {});
+    Object.keys(mergedRoomFolders).forEach(function(r) {
         if (deletedFolders.has(mergedRoomFolders[r])) delete mergedRoomFolders[r];
     });
 
-    const allRooms = new Set([...Object.keys(local.rooms || {}), ...Object.keys(remote.rooms || {})]);
+    var allRooms = new Set([...Object.keys(local.rooms || {}), ...Object.keys(remote.rooms || {})]);
     if (allRooms.size === 0) allRooms.add("General Stuff");
 
-    let chosenActiveRoom = local.activeRoom;
+    var chosenActiveRoom = local.activeRoom;
     if (!chosenActiveRoom || !allRooms.has(chosenActiveRoom)) {
         chosenActiveRoom = Array.from(allRooms)[0] || "General Stuff";
     }
 
-    const merged = { 
+    var merged = { 
         rooms: {}, 
         activeRoom: chosenActiveRoom,
         deleted: Array.from(deleted),
         deletedFolders: Array.from(deletedFolders),
         folders: Array.from(combinedFolders),
         roomFolders: mergedRoomFolders,
-        collapsedFolders: local.collapsedFolders || []
+        collapsedFolders: local.collapsedFolders || [],
+        notes: (remote.notesUpdated && remote.notesUpdated > (local.notesUpdated || 0)) 
+            ? (remote.notes || "") 
+            : (local.notes || remote.notes || ""),
+        notesUpdated: Math.max(local.notesUpdated || 0, remote.notesUpdated || 0)
     };
     
-    allRooms.forEach(room => {
-        const localMsgs = local.rooms?.[room] || [];
-        const remoteMsgs = remote.rooms?.[room] || [];
-        const map = new Map();
+    allRooms.forEach(function(room) {
+        var localMsgs = local.rooms ? (local.rooms[room] || []) : [];
+        var remoteMsgs = remote.rooms ? (remote.rooms[room] || []) : [];
+        var map = new Map();
 
-        [...localMsgs, ...remoteMsgs].forEach(msg => {
+        [...localMsgs, ...remoteMsgs].forEach(function(msg) {
             if (!msg) return;
-            let msgObj = typeof msg === 'object' ? { ...msg } : { type: 'text', text: String(msg), timestamp: '' };
+            var msgObj = typeof msg === 'object' ? Object.assign({}, msg) : { type: 'text', text: String(msg), timestamp: '' };
             if (!msgObj.id) msgObj.id = generateId();
 
             if (deleted.has(msgObj.id)) return;
 
-            const contentKey = (msgObj.type === 'media' || msgObj.type === 'file')
-                ? `file_${msgObj.fileName || ''}_${(msgObj.data || '').length}_${msgObj.timestamp || ''}` 
-                : `text_${msgObj.text || ''}_${msgObj.timestamp || ''}`;
+            var contentKey = (msgObj.type === 'media' || msgObj.type === 'file')
+                ? ('file_' + (msgObj.fileName || '') + '_' + ((msgObj.data || '').length) + '_' + (msgObj.timestamp || ''))
+                : ('text_' + (msgObj.text || '') + '_' + (msgObj.timestamp || ''));
 
             if (!map.has(contentKey)) {
                 map.set(contentKey, msgObj);
             } else {
-                const existing = map.get(contentKey);
+                var existing = map.get(contentKey);
                 if (msgObj.updatedAt && existing.updatedAt && msgObj.updatedAt > existing.updatedAt) {
                     map.set(contentKey, msgObj);
                 }
@@ -819,6 +815,13 @@ function mergeDatabases(local, remote) {
         
         merged.rooms[room] = Array.from(map.values());
     });
+
+    // Safely update notes textarea if not actively being typed in
+    var activeNotesEl = document.getElementById('quick-notes-input');
+    if (activeNotesEl && document.activeElement !== activeNotesEl) {
+        activeNotesEl.value = merged.notes || "";
+    }
+
     return merged;
 }
 
