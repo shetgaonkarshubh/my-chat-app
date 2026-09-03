@@ -1006,15 +1006,6 @@ async function runGistSync(isSilent = false) {
     }
 }
 
-function startAutoSync() {
-    runGistSync(true);
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') runGistSync(true);
-    });
-    if (autoSyncInterval) clearInterval(autoSyncInterval);
-    autoSyncInterval = setInterval(() => runGistSync(true), 300000);
-}
-
 // ==========================================
 // Event Listeners Registration
 // ==========================================
