@@ -320,7 +320,6 @@ function renderRooms() {
 function renderMessages() {
     const container = document.getElementById('messages-container');
     const title = document.getElementById('current-room-title');
-    const folderTag = document.getElementById('current-room-folder');
     if (!container || !title) return;
     container.innerHTML = '';
     
@@ -335,9 +334,9 @@ function renderMessages() {
     }
     title.textContent = db.activeRoom;
 
-    const currentFolder = db.roomFolders ? db.roomFolders[db.activeRoom] : null;
+    const folderTag = document.getElementById('current-room-folder');
     if (folderTag) {
-        folderTag.textContent = currentFolder ? `📁 ${currentFolder}` : '';
+        folderTag.textContent = '';
     }
     
     if (isSelectionMode) {

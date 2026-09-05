@@ -744,31 +744,41 @@ body, html, #app {
 .folder-action-item:hover { background: var(--bg-item-hover); }
 .folder-action-item.active { border-color: var(--primary-accent); background: var(--msg-sent-bg); color: var(--msg-sent-text); }
 
+/* Hide sub-header details / folder dat tags */
+.room-folder-tag {
+    display: none !important;
+}
+
 /* Mobile View Rules */
-#mobile-nav-bar { display: none; }
+#mobile-nav-bar { 
+    display: none; 
+}
 
 @media (max-width: 768px) {
     #app {
         flex-direction: column;
     }
 
+    /* Top switcher tabs visible only on the main screen */
     #mobile-nav-bar {
         display: flex;
         width: 100%;
         background: var(--bg-header);
         border-bottom: 1px solid var(--border-color);
+        z-index: 10;
     }
 
     .mobile-tab {
         flex: 1;
-        padding: 10px;
+        padding: 12px 10px;
         border: none;
         background: transparent;
         color: var(--bg-header-text);
-        font-size: 13.5px;
+        font-size: 14px;
         font-weight: 600;
         cursor: pointer;
         border-bottom: 2px solid transparent;
+        transition: all 0.15s ease;
     }
 
     .mobile-tab.active {
@@ -776,44 +786,58 @@ body, html, #app {
         color: var(--primary-accent);
     }
 
-    /* Initial state: show sidebar chats */
+    /* Main Screen: Sidebar chats list */
     #sidebar {
         width: 100%;
         max-width: 100%;
-        height: calc(100% - 41px);
+        height: calc(100% - 45px);
         display: flex;
     }
 
-    #chat-area {
-        width: 100%;
-        height: 65%;
-        display: none;
-    }
-
+    /* Main Screen: Notes panel (full-screen when tab active) */
     #notes-panel {
         width: 100%;
         max-width: 100%;
         min-width: 100%;
-        height: calc(100% - 41px);
+        height: calc(100% - 45px);
         border-left: none;
         display: none;
     }
 
-    #back-btn { display: block; }
-
-    /* Top tab switcher on phone */
-    body.show-todos #sidebar { display: none !important; }
-    body.show-todos #notes-panel { display: flex !important; }
-
-    /* Inside an active chat: 65% Chat on top + 35% To-Do on bottom */
-    #app.show-chat #mobile-nav-bar { display: none; }
-    #app.show-chat #sidebar { display: none !important; }
-    #app.show-chat #chat-area { display: flex !important; }
-    #app.show-chat #notes-panel { 
+    /* Tab switcher view control */
+    body.show-todos #sidebar { 
+        display: none !important; 
+    }
+    body.show-todos #notes-panel { 
         display: flex !important; 
-        height: 35%;
-        border-top: 1px solid var(--border-color);
     }
 
-    .message { max-width: 82%; }
+    /* Inside an active chat: 100% full screen chat, To-Do completely hidden */
+    #chat-area {
+        width: 100%;
+        height: 100%;
+        display: none;
+    }
+
+    #back-btn { 
+        display: block; 
+    }
+
+    #app.show-chat #mobile-nav-bar { 
+        display: none !important; 
+    }
+    #app.show-chat #sidebar { 
+        display: none !important; 
+    }
+    #app.show-chat #notes-panel { 
+        display: none !important; 
+    }
+    #app.show-chat #chat-area { 
+        display: flex !important; 
+        height: 100% !important; 
+    }
+
+    .message { 
+        max-width: 82%; 
+    }
 }
