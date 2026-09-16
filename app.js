@@ -499,35 +499,76 @@ function renderMessages() {
 // File Upload & Paste Handling
 // ==========================================
 
-function handleFileUpload(file) {
+function compressImage(file, maxWidth = 1200, quality = 0.7) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+
+                if (width > maxWidth) {
+                    height = Math.round((height * maxWidth) / width);
+                    width = maxWidth;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+
+                // Export as lightweight JPEG data URL
+                resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+async function handleFileUpload(file) {
     if (!file) return;
     if (!db.activeRoom) db.activeRoom = Object.keys(db.rooms)[0] || "General Stuff";
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const isImage = file.type.startsWith('image/');
-        const isVideo = file.type.startsWith('video/');
-        const isAudio = file.type.startsWith('audio/');
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    const isAudio = file.type.startsWith('audio/');
 
-        const mediaObj = {
-            id: generateId(),
-            type: (isImage || isVideo || isAudio) ? 'media' : 'file',
-            fileName: file.name || (isImage ? `image_${Date.now()}.png` : 'file'),
-            fileSize: file.size || 0,
-            fileType: file.type || 'application/octet-stream',
-            data: e.target.result,
-            timestamp: getCurrentTimeStr(),
-            updatedAt: Date.now()
-        };
+    let fileData = '';
+    let finalFileSize = file.size || 0;
+    let finalFileType = file.type || 'application/octet-stream';
 
-        if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
-        db.rooms[db.activeRoom].push(mediaObj);
-        saveData();
-        renderMessages();
-        queueSync();
+    if (isImage) {
+        // Compress down to ~100-250KB before writing to storage
+        fileData = await compressImage(file, 1200, 0.7);
+        finalFileSize = Math.round((fileData.length * 3) / 4);
+        finalFileType = 'image/jpeg';
+    } else {
+        fileData = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.readAsDataURL(file);
+        });
+    }
+
+    const mediaObj = {
+        id: generateId(),
+        type: (isImage || isVideo || isAudio) ? 'media' : 'file',
+        fileName: file.name || (isImage ? `image_${Date.now()}.jpg` : 'file'),
+        fileSize: finalFileSize,
+        fileType: finalFileType,
+        data: fileData,
+        timestamp: getCurrentTimeStr(),
+        updatedAt: Date.now()
     };
 
-    reader.readAsDataURL(file);
+    if (!db.rooms[db.activeRoom]) db.rooms[db.activeRoom] = [];
+    db.rooms[db.activeRoom].push(mediaObj);
+    saveData();
+    renderMessages();
+    queueSync();
 }
 
 // ==========================================
