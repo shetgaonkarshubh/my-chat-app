@@ -17,8 +17,16 @@ let targetMessageData = null;
 let toastTimeout = null;
 
 // ==========================================
-// Toast & Clipboard Helpers
+// Base64 & Text Helpers (Unicode Safe)
 // ==========================================
+
+function encodeBase64(str) {
+    return btoa(unescape(encodeURIComponent(str)));
+}
+
+function decodeBase64(str) {
+    return decodeURIComponent(escape(atob(str)));
+}
 
 function showToast(message = "Message copied") {
     const toast = document.getElementById('toast');
@@ -500,7 +508,9 @@ function renderMessages() {
 
 function getRepoConfig() {
     const token = (localStorage.getItem('gh_token') || '').replace(/\s+/g, '');
-    const repo = (localStorage.getItem('gh_repo') || '').replace(/\s+/g, '');
+    let repo = (localStorage.getItem('gh_repo') || '').replace(/\s+/g, '');
+    // Clean up input in case user pasted a full github.com URL
+    repo = repo.replace(/^https?:\/\/github\.com\//, '').replace(/\/$/, '');
     return { token, repo };
 }
 
@@ -521,9 +531,8 @@ async function uploadMediaToRepo(file) {
     const res = await fetch(url, {
         method: 'PUT',
         headers: {
-            'Authorization': 'token ' + token,
-            'Content-Type': 'application/json',
-            'Accept': 'application/vnd.github.v3+json'
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
         },
         body: JSON.stringify({
             message: `Upload media: ${cleanName}`,
@@ -551,11 +560,7 @@ async function commitDbJson(dbObject) {
     try {
         const checkRes = await fetch(url, {
             method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Accept': 'application/vnd.github+json',
-                'X-GitHub-Api-Version': '2022-11-28'
-            }
+            headers: { 'Authorization': `Bearer ${token}` }
         });
 
         if (checkRes.ok) {
@@ -563,12 +568,11 @@ async function commitDbJson(dbObject) {
             sha = fileInfo.sha;
         }
     } catch (e) {
-        // If file doesn't exist yet, proceed with sha = null
+        console.log("No existing file to update. Proceeding to create fresh db.json.");
     }
 
     const jsonStr = JSON.stringify(dbObject, null, 2);
-    // Safe Base64 encoding for Unicode / UTF-8
-    const contentEncoded = btoa(unescape(encodeURIComponent(jsonStr)));
+    const contentEncoded = encodeBase64(jsonStr);
 
     const payload = {
         message: `Sync state: ${new Date().toISOString()}`,
@@ -580,9 +584,7 @@ async function commitDbJson(dbObject) {
         method: 'PUT',
         headers: {
             'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2022-11-28'
+            'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
     });
@@ -1007,24 +1009,30 @@ async function runRepoSync(isSilent = false) {
     if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
 
     try {
-        const url = `https://api.github.com/repos/${repo}/contents/db.json?t=${Date.now()}`;
-        const res = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Accept': 'application/vnd.github+json',
-                'X-GitHub-Api-Version': '2022-11-28'
-            }
-        });
+        const url = `https://api.github.com/repos/${repo}/contents/db.json?nocache=${Date.now()}`;
+        
+        let res;
+        try {
+            res = await fetch(url, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+        } catch (networkErr) {
+            console.warn("GET request blocked (CORS 404 block). Forcing initialization...");
+            // Force initialization if Firefox killed the GET request completely
+            await commitDbJson(db);
+            if (statusEl) statusEl.textContent = `Synced (Initialized)`;
+            return;
+        }
 
         if (res.status === 401 || res.status === 403) {
-            throw new Error("Bad credentials or missing 'repo' scope.");
+            throw new Error("Bad credentials. Check your GitHub Token.");
         }
 
         if (res.ok) {
             const fileData = await res.json();
             if (fileData.content) {
-                const decodedJson = decodeURIComponent(escape(atob(fileData.content.replace(/\s/g, ''))));
+                const decodedJson = decodeBase64(fileData.content.replace(/\s/g, ''));
                 const remoteDb = JSON.parse(decodedJson);
                 db = mergeDatabases(db, remoteDb);
                 saveData();
@@ -1032,6 +1040,10 @@ async function runRepoSync(isSilent = false) {
                 renderMessages();
                 renderTodos();
             }
+        } else if (res.status === 404) {
+            console.log("No db.json found on remote. Creating new file...");
+        } else {
+            throw new Error(`HTTP Error: ${res.status}`);
         }
 
         await commitDbJson(db);
@@ -1041,6 +1053,18 @@ async function runRepoSync(isSilent = false) {
         console.error("Repo sync error:", err);
         if (statusEl && !isSilent) statusEl.textContent = 'Sync failed: ' + err.message;
     }
+}
+
+// Redirect old Gist aliases internally just in case they're called
+function runGistSync(isSilent) { return runRepoSync(isSilent); }
+
+function startAutoSync() {
+    runRepoSync(true);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') runRepoSync(true);
+    });
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
+    autoSyncInterval = setInterval(() => runRepoSync(true), 300000);
 }
 
 // ==========================================
