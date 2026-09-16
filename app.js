@@ -314,7 +314,7 @@ function renderRooms() {
 }
 
 // ==========================================
-// Messages Rendering & Multi-Tap / Triple-Click
+// Messages Rendering & Multi-Tap Controller
 // ==========================================
 
 function renderMessages() {
@@ -367,6 +367,7 @@ function renderMessages() {
             if (msg.fileType && msg.fileType.startsWith('image/')) {
                 const img = document.createElement('img'); 
                 img.src = msg.data; 
+                img.loading = 'lazy';
                 img.style.maxWidth = '100%'; 
                 img.style.borderRadius = '6px'; 
                 contentDiv.appendChild(img);
@@ -411,6 +412,7 @@ function renderMessages() {
             downloadBtn.classList.add('file-download-btn');
             downloadBtn.href = msg.data;
             downloadBtn.download = msg.fileName || 'file';
+            downloadBtn.target = '_blank';
             downloadBtn.textContent = '⬇ Download';
             downloadBtn.onclick = (e) => e.stopPropagation();
 
@@ -431,9 +433,6 @@ function renderMessages() {
             div.appendChild(timeSpan);
         }
 
-        // ==========================================
-        // Unified Click & Multi-Tap Controller
-        // ==========================================
         let clickTimer = null;
         let clickCounter = 0;
 
@@ -496,36 +495,94 @@ function renderMessages() {
 }
 
 // ==========================================
-// File Upload & Paste Handling
+// GitHub Repository Contents Engine (Files & Media)
 // ==========================================
 
-function compressImage(file, maxWidth = 1200, quality = 0.7) {
-    return new Promise((resolve) => {
+function getRepoConfig() {
+    const token = (localStorage.getItem('gh_token') || '').replace(/\s+/g, '');
+    const repo = (localStorage.getItem('gh_repo') || '').replace(/\s+/g, '');
+    return { token, repo };
+}
+
+async function uploadMediaToRepo(file) {
+    const { token, repo } = getRepoConfig();
+    if (!token || !repo) throw new Error("GitHub Token or Repo missing in Settings.");
+
+    const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `media/${Date.now()}_${cleanName}`;
+    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+
+    const base64Data = await new Promise((resolve) => {
         const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                let width = img.width;
-                let height = img.height;
-
-                if (width > maxWidth) {
-                    height = Math.round((height * maxWidth) / width);
-                    width = maxWidth;
-                }
-
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-
-                // Export as lightweight JPEG data URL
-                resolve(canvas.toDataURL('image/jpeg', quality));
-            };
-            img.src = e.target.result;
-        };
+        reader.onload = () => resolve(reader.result.split(',')[1]);
         reader.readAsDataURL(file);
     });
+
+    const res = await fetch(url, {
+        method: 'PUT',
+        headers: {
+            'Authorization': 'token ' + token,
+            'Content-Type': 'application/json',
+            'Accept': 'application/vnd.github.v3+json'
+        },
+        body: JSON.stringify({
+            message: `Upload media: ${cleanName}`,
+            content: base64Data
+        })
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Upload failed (${res.status})`);
+    }
+
+    const json = await res.json();
+    return json.content.download_url;
+}
+
+async function commitDbJson(dbObject) {
+    const { token, repo } = getRepoConfig();
+    if (!token || !repo) return;
+
+    const path = 'db.json';
+    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+
+    let sha = null;
+    const checkRes = await fetch(url, {
+        headers: {
+            'Authorization': 'token ' + token,
+            'Accept': 'application/vnd.github.v3+json'
+        }
+    });
+
+    if (checkRes.ok) {
+        const fileInfo = await checkRes.json();
+        sha = fileInfo.sha;
+    }
+
+    const jsonStr = JSON.stringify(dbObject, null, 2);
+    const contentEncoded = btoa(unescape(encodeURIComponent(jsonStr)));
+
+    const payload = {
+        message: `Sync state: ${new Date().toISOString()}`,
+        content: contentEncoded
+    };
+    if (sha) payload.sha = sha;
+
+    const pushRes = await fetch(url, {
+        method: 'PUT',
+        headers: {
+            'Authorization': 'token ' + token,
+            'Content-Type': 'application/json',
+            'Accept': 'application/vnd.github.v3+json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (!pushRes.ok) {
+        const err = await pushRes.json().catch(() => ({}));
+        throw new Error(err.message || `Sync failed (${pushRes.status})`);
+    }
 }
 
 async function handleFileUpload(file) {
@@ -536,30 +593,26 @@ async function handleFileUpload(file) {
     const isVideo = file.type.startsWith('video/');
     const isAudio = file.type.startsWith('audio/');
 
-    let fileData = '';
-    let finalFileSize = file.size || 0;
-    let finalFileType = file.type || 'application/octet-stream';
+    const statusEl = document.getElementById('sync-status');
+    if (statusEl) statusEl.textContent = "Uploading file...";
 
-    if (isImage) {
-        // Compress down to ~100-250KB before writing to storage
-        fileData = await compressImage(file, 1200, 0.7);
-        finalFileSize = Math.round((fileData.length * 3) / 4);
-        finalFileType = 'image/jpeg';
-    } else {
-        fileData = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsDataURL(file);
-        });
+    let mediaUrl = '';
+    try {
+        mediaUrl = await uploadMediaToRepo(file);
+    } catch (err) {
+        console.error("Upload error:", err);
+        showToast("Upload failed: " + err.message);
+        if (statusEl) statusEl.textContent = "Upload failed";
+        return;
     }
 
     const mediaObj = {
         id: generateId(),
         type: (isImage || isVideo || isAudio) ? 'media' : 'file',
         fileName: file.name || (isImage ? `image_${Date.now()}.jpg` : 'file'),
-        fileSize: finalFileSize,
-        fileType: finalFileType,
-        data: fileData,
+        fileSize: file.size || 0,
+        fileType: file.type || 'application/octet-stream',
+        data: mediaUrl,
         timestamp: getCurrentTimeStr(),
         updatedAt: Date.now()
     };
@@ -661,7 +714,7 @@ function openFolderConfigModal(folderName) {
 function queueSync() {
     if (window.syncDebounceTimer) clearTimeout(window.syncDebounceTimer);
     window.syncDebounceTimer = setTimeout(() => {
-        runGistSync(true);
+        runRepoSync(true);
     }, 2500);
 }
 
@@ -838,6 +891,7 @@ function deleteSelectedMessages() {
 // ==========================================
 // Conflict-Free Merge & Sync
 // ==========================================
+
 function mergeDatabases(local, remote) {
     if (!remote || typeof remote !== 'object') return local;
 
@@ -845,7 +899,6 @@ function mergeDatabases(local, remote) {
     var deletedFolders = new Set([...(local.deletedFolders || []), ...(remote.deletedFolders || [])]);
     var deletedTodos = new Set([...(local.deletedTodos || []), ...(remote.deletedTodos || [])]);
 
-    // 1. Merge Folders
     var combinedFolders = new Set([...(local.folders || []), ...(remote.folders || [])]);
     deletedFolders.forEach(function(df) { combinedFolders.delete(df); });
 
@@ -854,7 +907,6 @@ function mergeDatabases(local, remote) {
         if (deletedFolders.has(mergedRoomFolders[r])) delete mergedRoomFolders[r];
     });
 
-    // 2. Merge Rooms
     var allRooms = new Set([...Object.keys(local.rooms || {}), ...Object.keys(remote.rooms || {})]);
     if (allRooms.size === 0) allRooms.add("General Stuff");
 
@@ -863,7 +915,6 @@ function mergeDatabases(local, remote) {
         chosenActiveRoom = Array.from(allRooms)[0] || "General Stuff";
     }
 
-    // 3. Merge To-Dos (Highest timestamp wins; deleted items stay deleted)
     var todoMap = new Map();
     [...(local.todos || []), ...(remote.todos || [])].forEach(function(item) {
         if (!item || !item.id || deletedTodos.has(item.id)) return;
@@ -893,7 +944,6 @@ function mergeDatabases(local, remote) {
         notesUpdated: Math.max(local.notesUpdated || 0, remote.notesUpdated || 0)
     };
     
-    // 4. Merge Chat Messages & Photos by unique ID
     allRooms.forEach(function(room) {
         var localMsgs = local.rooms ? (local.rooms[room] || []) : [];
         var remoteMsgs = remote.rooms ? (remote.rooms[room] || []) : [];
@@ -906,7 +956,7 @@ function mergeDatabases(local, remote) {
 
             if (deleted.has(msgObj.id)) return;
 
-            var key = msgObj.id; // Map directly by unique ID to preserve photos
+            var key = msgObj.id;
             if (!map.has(key)) {
                 map.set(key, msgObj);
             } else {
@@ -930,133 +980,64 @@ function mergeDatabases(local, remote) {
 
 function loadSyncCredentials() {
     const token = localStorage.getItem('gh_token') || '';
-    const gistId = localStorage.getItem('gist_id') || '';
+    const repo = localStorage.getItem('gh_repo') || '';
     const tokenInput = document.getElementById('gh-token-input');
-    const gistInput = document.getElementById('gist-id-input');
+    const repoInput = document.getElementById('gh-repo-input');
     if (tokenInput) tokenInput.value = token;
-    if (gistInput) gistInput.value = gistId;
+    if (repoInput) repoInput.value = repo;
 }
 
-async function runGistSync(isSilent = false) {
-    var statusEl = document.getElementById('sync-status');
-    var tokenInput = document.getElementById('gh-token-input');
-    var gistInput = document.getElementById('gist-id-input');
-    
-    if (tokenInput && tokenInput.value.trim()) {
-        localStorage.setItem('gh_token', tokenInput.value.trim());
-    }
-    if (gistInput && gistInput.value.trim()) {
-        localStorage.setItem('gist_id', gistInput.value.trim());
-    }
+async function runRepoSync(isSilent = false) {
+    const statusEl = document.getElementById('sync-status');
+    const { token, repo } = getRepoConfig();
 
-    var token = (localStorage.getItem('gh_token') || '').replace(/\s+/g, '');
-    var currentGistId = (localStorage.getItem('gist_id') || '').replace(/\s+/g, '');
-
-    if (!token) {
-        if (statusEl && !isSilent) statusEl.textContent = "Token missing. Set your GitHub Token.";
+    if (!token || !repo) {
+        if (statusEl && !isSilent) statusEl.textContent = "Token or Repo missing in Settings.";
         return;
     }
 
     if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
 
     try {
-        if (currentGistId) {
-            var getUrl = 'https://api.github.com/gists/' + currentGistId + '?t=' + Date.now();
-            var res = await fetch(getUrl, {
-                method: 'GET',
-                headers: { 
-                    'Authorization': 'token ' + token,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-            });
-
-            if (res.status === 401 || res.status === 403) {
-                throw new Error("Bad credentials or rate limited.");
-            }
-            if (res.status === 404) {
-                throw new Error("Gist not found. Clear Gist ID to create a new one.");
-            }
-
-            if (res.ok) {
-                var data = await res.json();
-                var fileKeys = Object.keys(data.files || {});
-                var fileObj = fileKeys.length > 0 ? data.files[fileKeys[0]] : null;
-
-                if (fileObj) {
-                    var content = fileObj.content;
-
-                    // If file is truncated, fetch raw WITHOUT authorization headers (required by CORS)
-                    if (fileObj.truncated && fileObj.raw_url) {
-                        var rawSeparator = fileObj.raw_url.indexOf('?') === -1 ? '?' : '&';
-                        var rawRes = await fetch(fileObj.raw_url + rawSeparator + 'nocache=' + Date.now(), {
-                            method: 'GET',
-                            headers: {} // Must remain completely empty for CORS on gist.githubusercontent.com
-                        });
-                        
-                        if (!rawRes.ok) throw new Error('Raw download failed: ' + rawRes.status);
-                        content = await rawRes.text();
-                    }
-
-                    if (content) {
-                        var remoteDb = JSON.parse(content);
-                        db = mergeDatabases(db, remoteDb);
-                        saveData();
-                        renderRooms();
-                        renderMessages();
-                        renderTodos();
-                    }
-                }
-            }
-        }
-
-        // Prepare payload
-        var dbPayload = JSON.stringify(db);
-
-        // Check if payload exceeds GitHub Gist limits (~10MB)
-        if (dbPayload.length > 9 * 1024 * 1024) {
-            throw new Error("Database exceeds 9MB Gist limit. Delete large files.");
-        }
-
-        var payload = {
-            description: "Self Chat Backup DB",
-            public: false,
-            files: { 
-                "self_chat_db.json": { 
-                    content: dbPayload 
-                } 
-            }
-        };
-
-        var syncMethod = currentGistId ? 'PATCH' : 'POST';
-        var syncUrl = currentGistId ? ('https://api.github.com/gists/' + currentGistId) : 'https://api.github.com/gists';
-
-        var pushRes = await fetch(syncUrl, {
-            method: syncMethod,
-            headers: { 
+        const url = `https://api.github.com/repos/${repo}/contents/db.json?t=${Date.now()}`;
+        const res = await fetch(url, {
+            headers: {
                 'Authorization': 'token ' + token,
-                'Content-Type': 'application/json',
-                'Accept': 'application/vnd.github.v3+json'
-            },
-            body: JSON.stringify(payload)
+                'Accept': 'application/vnd.github.v3.raw'
+            }
         });
 
-        if (!pushRes.ok) {
-            var errJson = await pushRes.json().catch(function() { return {}; });
-            throw new Error(errJson.message || ('HTTP ' + pushRes.status));
-        }
-        
-        var pushData = await pushRes.json();
-        if (pushData && pushData.id) {
-            currentGistId = pushData.id;
-            localStorage.setItem('gist_id', currentGistId);
-            if (gistInput) gistInput.value = currentGistId;
+        if (res.status === 401 || res.status === 403) {
+            throw new Error("Bad credentials or missing 'repo' scope.");
         }
 
-        if (statusEl) statusEl.textContent = 'Synced (' + getCurrentTimeStr() + ')';
+        if (res.ok) {
+            const remoteDb = await res.json();
+            db = mergeDatabases(db, remoteDb);
+            saveData();
+            renderRooms();
+            renderMessages();
+            renderTodos();
+        }
+
+        await commitDbJson(db);
+
+        if (statusEl) statusEl.textContent = `Synced (${getCurrentTimeStr()})`;
     } catch (err) {
-        console.error("Gist sync error:", err);
+        console.error("Repo sync error:", err);
         if (statusEl && !isSilent) statusEl.textContent = 'Sync failed: ' + err.message;
     }
+}
+
+function runGistSync(isSilent) { return runRepoSync(isSilent); }
+
+function startAutoSync() {
+    runRepoSync(true);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') runRepoSync(true);
+    });
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
+    autoSyncInterval = setInterval(() => runRepoSync(true), 300000);
 }
 
 // ==========================================
@@ -1064,7 +1045,6 @@ async function runGistSync(isSilent = false) {
 // ==========================================
 
 function attachEventListeners() {
-    // Quick Notes Auto-Save Listener
     const notesInput = document.getElementById('quick-notes-input');
     const notesStatus = document.getElementById('notes-save-status');
     let notesTimer = null;
@@ -1084,7 +1064,6 @@ function attachEventListeners() {
         });
     }
 
-    // Interactive To-Do List Submission
     const todoForm = document.getElementById('todo-form');
     const todoInput = document.getElementById('todo-input');
     if (todoForm && todoInput) {
@@ -1108,7 +1087,6 @@ function attachEventListeners() {
         };
     }
 
-    // Mobile Switcher Tabs
     const tabChats = document.getElementById('mobile-tab-chats');
     const tabTodos = document.getElementById('mobile-tab-todos');
     if (tabChats && tabTodos) {
@@ -1253,21 +1231,21 @@ function attachEventListeners() {
     if (saveSyncBtn) {
         saveSyncBtn.onclick = () => {
             const token = (document.getElementById('gh-token-input')?.value || '').trim();
-            const gistId = (document.getElementById('gist-id-input')?.value || '').trim();
+            const repo = (document.getElementById('gh-repo-input')?.value || '').trim();
             const theme = document.getElementById('theme-select')?.value || 'default';
             
             localStorage.setItem('gh_token', token);
-            localStorage.setItem('gist_id', gistId);
+            localStorage.setItem('gh_repo', repo);
             applyTheme(theme);
             
             const statusEl = document.getElementById('sync-status');
             if (statusEl) statusEl.textContent = "Settings saved!";
-            runGistSync(false);
+            runRepoSync(false);
         };
     }
 
     const runSyncBtn = document.getElementById('run-sync-btn');
-    if (runSyncBtn) runSyncBtn.onclick = () => runGistSync(false);
+    if (runSyncBtn) runSyncBtn.onclick = () => runRepoSync(false);
 
     const mediaInput = document.getElementById('media-input');
     const attachBtn = document.getElementById('attach-btn');
