@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="style.css?v=9">
+    <link rel="stylesheet" href="style.css?v=10">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Self Chat">
@@ -56,6 +56,7 @@
                 <button type="submit">Send</button>
             </form>
         </main>
+        
         <div id="mobile-nav-bar">
             <button id="mobile-tab-chats" class="mobile-tab active">💬 Chats</button>
             <button id="mobile-tab-todos" class="mobile-tab">📌 To-Do List</button>
@@ -105,11 +106,11 @@
                 <option value="black-white">5. Velvet OLED (Black & White)</option>
             </select>
 
-            <label for="gh-token-input" style="margin-top: 8px;">GitHub Token:</label>
-            <input type="password" id="gh-token-input" placeholder="ghp_xxxxxxxxxxxx">
+            <label for="gh-token-input" style="margin-top: 8px;">GitHub Token (needs "repo" scope):</label>
+            <input type="password" id="gh-token-input" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off">
             
-            <label for="gist-id-input">Gist ID (leave blank to auto-create):</label>
-            <input type="text" id="gist-id-input" placeholder="Auto-generated on first sync">
+            <label for="gh-repo-input">Storage Repository (owner/repo):</label>
+            <input type="text" id="gh-repo-input" placeholder="e.g. yourname/self-chat-data" autocomplete="off" autocapitalize="none">
             
             <div class="modal-actions">
                 <button id="save-sync-btn">Save Settings</button>
@@ -123,6 +124,6 @@
     <div id="toast" class="toast hidden">Message copied</div>
 
     <script src="localforage.min.js"></script>
-    <script src="app.js?v=9"></script>
+    <script src="app.js?v=10"></script>
 </body>
 </html>
