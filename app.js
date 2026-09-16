@@ -548,19 +548,26 @@ async function commitDbJson(dbObject) {
     const url = `https://api.github.com/repos/${repo}/contents/${path}`;
 
     let sha = null;
-    const checkRes = await fetch(url, {
-        headers: {
-            'Authorization': 'token ' + token,
-            'Accept': 'application/vnd.github.v3+json'
-        }
-    });
+    try {
+        const checkRes = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28'
+            }
+        });
 
-    if (checkRes.ok) {
-        const fileInfo = await checkRes.json();
-        sha = fileInfo.sha;
+        if (checkRes.ok) {
+            const fileInfo = await checkRes.json();
+            sha = fileInfo.sha;
+        }
+    } catch (e) {
+        // If file doesn't exist yet, proceed with sha = null
     }
 
     const jsonStr = JSON.stringify(dbObject, null, 2);
+    // Safe Base64 encoding for Unicode / UTF-8
     const contentEncoded = btoa(unescape(encodeURIComponent(jsonStr)));
 
     const payload = {
@@ -572,9 +579,10 @@ async function commitDbJson(dbObject) {
     const pushRes = await fetch(url, {
         method: 'PUT',
         headers: {
-            'Authorization': 'token ' + token,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
-            'Accept': 'application/vnd.github.v3+json'
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28'
         },
         body: JSON.stringify(payload)
     });
@@ -1001,9 +1009,11 @@ async function runRepoSync(isSilent = false) {
     try {
         const url = `https://api.github.com/repos/${repo}/contents/db.json?t=${Date.now()}`;
         const res = await fetch(url, {
+            method: 'GET',
             headers: {
-                'Authorization': 'token ' + token,
-                'Accept': 'application/vnd.github.v3+json'
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28'
             }
         });
 
@@ -1014,7 +1024,6 @@ async function runRepoSync(isSilent = false) {
         if (res.ok) {
             const fileData = await res.json();
             if (fileData.content) {
-                // Decode base64 content returned by GitHub API
                 const decodedJson = decodeURIComponent(escape(atob(fileData.content.replace(/\s/g, ''))));
                 const remoteDb = JSON.parse(decodedJson);
                 db = mergeDatabases(db, remoteDb);
@@ -1025,7 +1034,6 @@ async function runRepoSync(isSilent = false) {
             }
         }
 
-        // Push merged state back to repository
         await commitDbJson(db);
 
         if (statusEl) statusEl.textContent = `Synced (${getCurrentTimeStr()})`;
@@ -1033,17 +1041,6 @@ async function runRepoSync(isSilent = false) {
         console.error("Repo sync error:", err);
         if (statusEl && !isSilent) statusEl.textContent = 'Sync failed: ' + err.message;
     }
-}
-
-function runGistSync(isSilent) { return runRepoSync(isSilent); }
-
-function startAutoSync() {
-    runRepoSync(true);
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') runRepoSync(true);
-    });
-    if (autoSyncInterval) clearInterval(autoSyncInterval);
-    autoSyncInterval = setInterval(() => runRepoSync(true), 300000);
 }
 
 // ==========================================
