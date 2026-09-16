@@ -1003,7 +1003,7 @@ async function runRepoSync(isSilent = false) {
         const res = await fetch(url, {
             headers: {
                 'Authorization': 'token ' + token,
-                'Accept': 'application/vnd.github.v3.raw'
+                'Accept': 'application/vnd.github.v3+json'
             }
         });
 
@@ -1012,14 +1012,20 @@ async function runRepoSync(isSilent = false) {
         }
 
         if (res.ok) {
-            const remoteDb = await res.json();
-            db = mergeDatabases(db, remoteDb);
-            saveData();
-            renderRooms();
-            renderMessages();
-            renderTodos();
+            const fileData = await res.json();
+            if (fileData.content) {
+                // Decode base64 content returned by GitHub API
+                const decodedJson = decodeURIComponent(escape(atob(fileData.content.replace(/\s/g, ''))));
+                const remoteDb = JSON.parse(decodedJson);
+                db = mergeDatabases(db, remoteDb);
+                saveData();
+                renderRooms();
+                renderMessages();
+                renderTodos();
+            }
         }
 
+        // Push merged state back to repository
         await commitDbJson(db);
 
         if (statusEl) statusEl.textContent = `Synced (${getCurrentTimeStr()})`;
