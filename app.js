@@ -949,8 +949,8 @@ async function runGistSync(isSilent = false) {
         localStorage.setItem('gist_id', gistInput.value.trim());
     }
 
-    var token = (localStorage.getItem('gh_token') || '').trim();
-    var currentGistId = (localStorage.getItem('gist_id') || '').trim();
+    var token = (localStorage.getItem('gh_token') || '').replace(/\s+/g, '');
+    var currentGistId = (localStorage.getItem('gist_id') || '').replace(/\s+/g, '');
 
     if (!token) {
         if (statusEl && !isSilent) statusEl.textContent = "Token missing. Set your GitHub Token.";
@@ -961,8 +961,9 @@ async function runGistSync(isSilent = false) {
 
     try {
         if (currentGistId) {
-            var getUrl = 'https://api.github.com/gists/' + currentGistId;
+            var getUrl = 'https://api.github.com/gists/' + currentGistId + '?t=' + Date.now();
             var res = await fetch(getUrl, {
+                method: 'GET',
                 headers: { 
                     'Authorization': 'token ' + token,
                     'Accept': 'application/vnd.github.v3+json'
@@ -970,10 +971,10 @@ async function runGistSync(isSilent = false) {
             });
 
             if (res.status === 401 || res.status === 403) {
-                throw new Error("Bad credentials. Recheck your GitHub token.");
+                throw new Error("Bad credentials or rate limited.");
             }
             if (res.status === 404) {
-                throw new Error("Gist ID not found. Clear Gist ID to recreate.");
+                throw new Error("Gist not found. Clear Gist ID to create a new one.");
             }
 
             if (res.ok) {
@@ -984,11 +985,15 @@ async function runGistSync(isSilent = false) {
                 if (fileObj) {
                     var content = fileObj.content;
 
-                    // Large photo payload (>1MB): fetch complete raw string
+                    // If file is truncated, fetch raw WITHOUT authorization headers (required by CORS)
                     if (fileObj.truncated && fileObj.raw_url) {
-                        var separator = fileObj.raw_url.indexOf('?') === -1 ? '?' : '&';
-                        var rawRes = await fetch(fileObj.raw_url + separator + 'nocache=' + Date.now());
-                        if (!rawRes.ok) throw new Error('Raw fetch failed (' + rawRes.status + ')');
+                        var rawSeparator = fileObj.raw_url.indexOf('?') === -1 ? '?' : '&';
+                        var rawRes = await fetch(fileObj.raw_url + rawSeparator + 'nocache=' + Date.now(), {
+                            method: 'GET',
+                            headers: {} // Must remain completely empty for CORS on gist.githubusercontent.com
+                        });
+                        
+                        if (!rawRes.ok) throw new Error('Raw download failed: ' + rawRes.status);
                         content = await rawRes.text();
                     }
 
@@ -1004,12 +1009,20 @@ async function runGistSync(isSilent = false) {
             }
         }
 
+        // Prepare payload
+        var dbPayload = JSON.stringify(db);
+
+        // Check if payload exceeds GitHub Gist limits (~10MB)
+        if (dbPayload.length > 9 * 1024 * 1024) {
+            throw new Error("Database exceeds 9MB Gist limit. Delete large files.");
+        }
+
         var payload = {
             description: "Self Chat Backup DB",
             public: false,
             files: { 
                 "self_chat_db.json": { 
-                    content: JSON.stringify(db) 
+                    content: dbPayload 
                 } 
             }
         };
