@@ -1276,6 +1276,20 @@ function attachEventListeners() {
             runRepoSync(false);
         };
     }
+    const forcePushBtn = document.getElementById('force-push-btn');
+    if (forcePushBtn) {
+        forcePushBtn.onclick = async () => {
+            const statusEl = document.getElementById('sync-status');
+            if (statusEl) statusEl.textContent = "Force pushing current device data...";
+            try {
+                await commitDbJson(db); // Push local db directly without GET merge!
+                if (statusEl) statusEl.textContent = `Force Synced! (${getCurrentTimeStr()})`;
+                showToast("Successfully pushed local data!");
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'Force Push failed: ' + err.message;
+            }
+        };
+    }
 
     const runSyncBtn = document.getElementById('run-sync-btn');
     if (runSyncBtn) runSyncBtn.onclick = () => runRepoSync(false);
