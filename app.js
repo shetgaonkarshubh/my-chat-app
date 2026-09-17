@@ -509,7 +509,6 @@ function renderMessages() {
 function getRepoConfig() {
     const token = (localStorage.getItem('gh_token') || '').replace(/\s+/g, '');
     let repo = (localStorage.getItem('gh_repo') || '').replace(/\s+/g, '');
-    // Clean up input in case user pasted a full github.com URL
     repo = repo.replace(/^https?:\/\/github\.com\//, '').replace(/\/$/, '');
     return { token, repo };
 }
@@ -549,14 +548,7 @@ async function uploadMediaToRepo(file) {
     return json.content.download_url;
 }
 
-
-
-async function handleFileUpload(file) {
-    if (!file) return;
-    if (!db.activeRoom) db.activeRoom = Object.keys(db.rooms)[0] || "General Stuff";
-
-    const isImage = file.type.startsWith('image/');
-    const isVideo = file.type.startsWith('video/');async function commitDbJson(dbObject, retryCount = 0) {
+async function commitDbJson(dbObject, retryCount = 0) {
     const { token, repo } = getRepoConfig();
     if (!token || !repo) return;
 
@@ -567,9 +559,11 @@ async function handleFileUpload(file) {
     try {
         const checkRes = await fetch(`${url}?nocache=${Date.now()}`, {
             method: 'GET',
+            cache: 'no-store',
             headers: { 
                 'Authorization': 'token ' + token,
-                'Accept': 'application/vnd.github.v3+json'
+                'Accept': 'application/vnd.github.v3+json',
+                'Cache-Control': 'no-cache'
             }
         });
 
@@ -592,6 +586,7 @@ async function handleFileUpload(file) {
 
     const pushRes = await fetch(url, {
         method: 'PUT',
+        cache: 'no-store',
         headers: {
             'Authorization': 'token ' + token,
             'Accept': 'application/vnd.github.v3+json',
@@ -600,9 +595,9 @@ async function handleFileUpload(file) {
         body: JSON.stringify(payload)
     });
 
-    // The Magic Fix: Auto-retry on 409 Conflict
     if (pushRes.status === 409 && retryCount < 3) {
         console.warn("GitHub SHA conflict (409). Retrying with fresh SHA...");
+        await new Promise(r => setTimeout(r, 1000));
         return await commitDbJson(dbObject, retryCount + 1);
     }
 
@@ -610,7 +605,14 @@ async function handleFileUpload(file) {
         const err = await pushRes.json().catch(() => ({}));
         throw new Error(err.message || `HTTP ${pushRes.status}`);
     }
-}Freo
+}
+
+async function handleFileUpload(file) {
+    if (!file) return;
+    if (!db.activeRoom) db.activeRoom = Object.keys(db.rooms)[0] || "General Stuff";
+
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
     const isAudio = file.type.startsWith('audio/');
 
     const statusEl = document.getElementById('sync-status');
@@ -1024,9 +1026,11 @@ async function runRepoSync(isSilent = false) {
         try {
             const res = await fetch(url, {
                 method: 'GET',
+                cache: 'no-store',
                 headers: { 
                     'Authorization': 'token ' + token,
-                    'Accept': 'application/vnd.github.v3+json'
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Cache-Control': 'no-cache'
                 }
             });
 
@@ -1362,6 +1366,11 @@ if (document.readyState === 'loading') {
     initApp();
 }
 
+// FORCE Nuke the Service Worker
 if ('serviceWorker' in navigator) { 
-    navigator.serviceWorker.register('sw.js').catch(() => {}); 
+    navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(let registration of registrations) {
+            registration.unregister();
+        }
+    });
 }
