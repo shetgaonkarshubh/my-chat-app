@@ -619,12 +619,27 @@ async function explicitPull() {
             }
         });
 
-        if (!res.ok) throw new Error("Failed to fetch from GitHub (HTTP " + res.status + ")");
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`GitHub API Error (${res.status}): ${errText}`);
+        }
 
         const fileData = await res.json();
-        const decoded = JSON.parse(decodeBase64(fileData.content.replace(/\s/g, '')));
+        
+        // Ensure content exists and is valid base64
+        if (!fileData || !fileData.content) {
+            throw new Error("Invalid response structure from GitHub contents API.");
+        }
 
-        db = decoded;
+        const decodedString = decodeBase64(fileData.content.replace(/\s/g, ''));
+        
+        // Double check that it starts with valid JSON characters ('{' or '[')
+        const trimmed = decodedString.trim();
+        if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+            throw new Error("Received non-JSON content from GitHub. Check if db.json path is correct.");
+        }
+
+        db = JSON.parse(trimmed);
         saveData();
 
         if (typeof renderRooms === 'function') renderRooms();
@@ -636,10 +651,9 @@ async function explicitPull() {
         console.log("📥 Pull complete. Local state updated from GitHub.");
     } catch (err) {
         if (statusEl) statusEl.textContent = 'Pull failed: ' + err.message;
-        console.error(err);
+        console.error("Pull error details:", err);
     }
 }
-
 // --- 📤 EXPLICIT PUSH: Force upload current local state to GitHub, ignoring conflicts ---
 async function explicitPush() {
     const { token, repo } = getRepoConfig();
