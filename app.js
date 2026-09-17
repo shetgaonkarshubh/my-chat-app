@@ -557,8 +557,9 @@ async function commitDbJson(dbObject) {
     
     let sha = null;
     try {
-        // Harmless ?t= bypasses cache organically. NO cache: 'no-store' here!
-        const checkRes = await fetch(`${url}?t=${Date.now()}`, {
+        // Bypass CORS penalty cache & adblockers with a random string
+        const reqId = Math.random().toString(36).substring(2, 10);
+        const checkRes = await fetch(`${url}?req_id=${reqId}`, {
             method: 'GET',
             headers: { 
                 'Authorization': 'token ' + token,
@@ -583,7 +584,6 @@ async function commitDbJson(dbObject) {
     };
     if (sha) payload.sha = sha;
 
-    // NO cache: 'no-store' here either!
     const pushRes = await fetch(url, {
         method: 'PUT',
         headers: {
@@ -616,12 +616,12 @@ async function runRepoSync(isSilent = false) {
     if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
 
     try {
-        // Harmless ?t= URL parameter
-        const url = `https://api.github.com/repos/${repo}/contents/db.json?t=${Date.now()}`;
+        // Bypass CORS penalty cache & adblockers with a random string
+        const reqId = Math.random().toString(36).substring(2, 10);
+        const checkUrl = `https://api.github.com/repos/${repo}/contents/db.json?req_id=${reqId}`;
         
         try {
-            // NO cache: 'no-store' command
-            const res = await fetch(url, {
+            const res = await fetch(checkUrl, {
                 method: 'GET',
                 headers: { 
                     'Authorization': 'token ' + token,
