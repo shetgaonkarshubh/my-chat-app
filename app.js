@@ -651,60 +651,42 @@ async function explicitPush() {
     const statusEl = document.getElementById('sync-status');
     if (statusEl) statusEl.textContent = "Pushing to GitHub...";
 
-    const url = `https://api.github.com/repos/${repo}/contents/db.json`;
-    const content = encodeBase64(JSON.stringify(db, null, 2));
+    try {
+        const url = `https://api.github.com/repos/${repo}/contents/db.json`;
 
-    const maxAttempts = 5;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            let sha = null;
-            const getRes = await fetch(`${url}?ref=main&_nocache=${Date.now()}_${Math.random()}`, {
-                headers: {
-                    'Authorization': 'token ' + token,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-            });
-
-            if (getRes.ok) {
-                const fileData = await getRes.json();
-                sha = fileData.sha;
-            }
-
-            const payload = {
-                message: `Manual explicit push: ${new Date().toISOString()}`,
-                content: content
-            };
-            if (sha) payload.sha = sha;
-
-            const putRes = await fetch(url, {
-                method: 'PUT',
-                headers: {
-                    'Authorization': 'token ' + token,
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-
-            if (putRes.ok) {
-                if (statusEl) statusEl.textContent = `Pushed successfully! (${new Date().toLocaleTimeString()})`;
-                console.log("📤 Push complete! Data is live on GitHub.");
-                return;
-            }
-
-            if (putRes.status === 409 && attempt < maxAttempts) {
-                console.warn(`Attempt ${attempt} hit a 409 conflict. Retrying with fresh SHA...`);
-                await new Promise(res => setTimeout(res, 300));
-                continue;
-            }
-
-            throw new Error(await putRes.text());
-        } catch (err) {
-            if (attempt === maxAttempts) {
-                if (statusEl) statusEl.textContent = 'Push failed: ' + err.message;
-                console.error(err);
-            }
+        // Get absolute latest SHA
+        let sha = null;
+        const getRes = await fetch(url, {
+            headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github.v3+json' }
+        });
+        if (getRes.ok) {
+            const data = await getRes.json();
+            sha = data.sha;
         }
+
+        const payload = {
+            message: `Manual explicit push: ${new Date().toISOString()}`,
+            content: encodeBase64(JSON.stringify(db, null, 2))
+        };
+        if (sha) payload.sha = sha;
+
+        const putRes = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Authorization': 'token ' + token,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!putRes.ok) throw new Error(await putRes.text());
+
+        if (statusEl) statusEl.textContent = `Pushed successfully! (${new Date().toLocaleTimeString()})`;
+        console.log("📤 Push complete!");
+    } catch (err) {
+        if (statusEl) statusEl.textContent = 'Push failed: ' + err.message;
+        console.error(err);
     }
 }
 
