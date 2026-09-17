@@ -676,7 +676,7 @@ async function explicitPush() {
     try {
         const url = `https://api.github.com/repos/${repo}/contents/db.json`;
 
-        // Get absolute latest SHA right now
+        // 1. Fetch the exact live SHA right now to prevent 409 conflicts
         let sha = null;
         const getRes = await fetch(`${url}?t=${Date.now()}`, {
             headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github.v3+json' }
@@ -686,12 +686,14 @@ async function explicitPush() {
             sha = data.sha;
         }
 
+        // 2. Prepare payload
         const payload = {
             message: `Manual explicit push: ${new Date().toISOString()}`,
             content: encodeBase64(JSON.stringify(db, null, 2))
         };
         if (sha) payload.sha = sha;
 
+        // 3. Push to GitHub
         const putRes = await fetch(url, {
             method: 'PUT',
             headers: {
