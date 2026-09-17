@@ -557,12 +557,13 @@ async function commitDbJson(dbObject, retryCount = 0) {
     
     let sha = null;
     try {
-        const checkRes = await fetch(`${url}?nocache=${Date.now()}`, {
+        // Removed the ?nocache tracking trigger
+        const checkRes = await fetch(url, {
             method: 'GET',
             cache: 'no-store',
             headers: { 
                 'Authorization': 'token ' + token,
-                'Accept': 'application/vnd.github.v3+json',
+                'Accept': 'application/vnd.github.v3+json'
             }
         });
 
@@ -1020,7 +1021,8 @@ async function runRepoSync(isSilent = false) {
     if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
 
     try {
-        const url = `https://api.github.com/repos/${repo}/contents/db.json?nocache=${Date.now()}`;
+        // Removed the ?nocache tracking trigger
+        const url = `https://api.github.com/repos/${repo}/contents/db.json`;
         
         try {
             const res = await fetch(url, {
@@ -1028,7 +1030,7 @@ async function runRepoSync(isSilent = false) {
                 cache: 'no-store',
                 headers: { 
                     'Authorization': 'token ' + token,
-                    'Accept': 'application/vnd.github.v3+json',
+                    'Accept': 'application/vnd.github.v3+json'
                 }
             });
 
