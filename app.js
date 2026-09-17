@@ -563,7 +563,6 @@ async function commitDbJson(dbObject, retryCount = 0) {
             headers: { 
                 'Authorization': 'token ' + token,
                 'Accept': 'application/vnd.github.v3+json',
-                'Cache-Control': 'no-cache'
             }
         });
 
@@ -1030,7 +1029,6 @@ async function runRepoSync(isSilent = false) {
                 headers: { 
                     'Authorization': 'token ' + token,
                     'Accept': 'application/vnd.github.v3+json',
-                    'Cache-Control': 'no-cache'
                 }
             });
 
