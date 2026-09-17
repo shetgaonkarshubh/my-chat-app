@@ -557,10 +557,9 @@ async function commitDbJson(dbObject) {
     
     let sha = null;
     try {
-        // Safe cache-buster (?v=) bypasses GitHub CDN without triggering adblockers!
-        const checkRes = await fetch(`${url}?v=${Date.now()}`, {
+        // Harmless ?t= bypasses cache organically. NO cache: 'no-store' here!
+        const checkRes = await fetch(`${url}?t=${Date.now()}`, {
             method: 'GET',
-            cache: 'no-store',
             headers: { 
                 'Authorization': 'token ' + token,
                 'Accept': 'application/vnd.github.v3+json'
@@ -584,9 +583,9 @@ async function commitDbJson(dbObject) {
     };
     if (sha) payload.sha = sha;
 
+    // NO cache: 'no-store' here either!
     const pushRes = await fetch(url, {
         method: 'PUT',
-        cache: 'no-store',
         headers: {
             'Authorization': 'token ' + token,
             'Accept': 'application/vnd.github.v3+json',
@@ -595,7 +594,6 @@ async function commitDbJson(dbObject) {
         body: JSON.stringify(payload)
     });
 
-    // Safe failure: Do not blindly overwrite data!
     if (pushRes.status === 409) {
         throw new Error("Conflict (409) - New data exists on GitHub. Click Sync again to pull and merge changes!");
     }
@@ -618,13 +616,13 @@ async function runRepoSync(isSilent = false) {
     if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
 
     try {
-        // Safe cache-buster (?v=) bypasses GitHub CDN
-        const url = `https://api.github.com/repos/${repo}/contents/db.json?v=${Date.now()}`;
+        // Harmless ?t= URL parameter
+        const url = `https://api.github.com/repos/${repo}/contents/db.json?t=${Date.now()}`;
         
         try {
+            // NO cache: 'no-store' command
             const res = await fetch(url, {
                 method: 'GET',
-                cache: 'no-store',
                 headers: { 
                     'Authorization': 'token ' + token,
                     'Accept': 'application/vnd.github.v3+json'
