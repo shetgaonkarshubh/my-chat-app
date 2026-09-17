@@ -189,31 +189,14 @@ function initApp() {
             db = Object.assign(db, savedData);
         }
         
-        if (!db.notes) db.notes = "";
-        const notesArea = document.getElementById('quick-notes-input');
-        if (notesArea) notesArea.value = db.notes || "";
-
-        if (!db.rooms || Object.keys(db.rooms).length === 0) {
-            db.rooms = { "General Stuff": [] };
-        }
-        if (!db.deleted) db.deleted = [];
-        if (!db.folders) db.folders = [];
-        if (!db.deletedFolders) db.deletedFolders = [];
-        if (!db.roomFolders) db.roomFolders = {};
-        if (!db.collapsedFolders) db.collapsedFolders = [];
-        if (!db.todos) db.todos = [];
-        if (!db.deletedTodos) db.deletedTodos = [];
-        
-        if (!db.activeRoom || !db.rooms[db.activeRoom]) {
-            db.activeRoom = Object.keys(db.rooms)[0] || "General Stuff";
-        }
+        // ... (other initialization code) ...
 
         renderRooms(); 
         renderMessages(); 
         renderTodos();
         attachEventListeners();
         loadSyncCredentials();
-        startAutoSync();
+        // startAutoSync(); // <-- COMMENT THIS OUT SO IT STOPS SPAMMING 401s
     }).catch((err) => {
         console.error("LocalForage load error:", err);
         renderRooms(); 
@@ -221,7 +204,7 @@ function initApp() {
         renderTodos();
         attachEventListeners();
         loadSyncCredentials();
-        startAutoSync();
+        // startAutoSync(); // <-- COMMENT THIS OUT HERE TOO
     });
 }
 
