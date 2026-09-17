@@ -127,4 +127,133 @@
     <script src="localforage.min.js"></script>
     <script src="app.js?v=20"></script>
 </body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Self Chat</title>
+    <link rel="manifest" href="manifest.json">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css?v=10">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Self Chat">
+</head>
+<body>
+    <div id="app">
+        <aside id="sidebar">
+            <header>
+                <h2>My Space</h2>
+                <div class="header-actions">
+                    <button id="add-folder-btn" title="Create Folder">📁+</button>
+                    <button id="add-room-btn" title="Create Chat">✦ New</button>
+                </div>
+            </header>
+            <ul id="room-list"></ul>
+        </aside>
+        
+        <main id="chat-area">
+            <header id="chat-header">
+                <button id="back-btn">←</button>
+                <div class="header-title-wrap">
+                    <h3 id="current-room-title">Select a room</h3>
+                    <span id="current-room-folder" class="room-folder-tag"></span>
+                </div>
+                <button id="room-options-btn" title="Chat Settings">⋮</button>
+            </header>
+
+            <header id="selection-header" class="hidden">
+                <div class="selection-info">
+                    <button id="cancel-selection-btn">✕</button>
+                    <span id="selected-count">0 selected</span>
+                </div>
+                <button id="delete-selected-btn" class="action-btn-danger">🗑️ Delete</button>
+            </header>
+
+            <div id="messages-container"></div>
+
+            <form id="message-form">
+                <input type="file" id="media-input" style="display: none;">
+                <button type="button" id="attach-btn" title="Attach file">📎</button>
+                <textarea id="message-input" placeholder="Type a message or paste an image... (Shift+Enter for newline)" rows="1"></textarea>
+                <button type="submit">Send</button>
+            </form>
+        </main>
+        
+        <div id="mobile-nav-bar">
+            <button id="mobile-tab-chats" class="mobile-tab active">💬 Chats</button>
+            <button id="mobile-tab-todos" class="mobile-tab">📌 To-Do List</button>
+        </div>
+
+        <aside id="notes-panel">
+            <header class="notes-header">
+                <h3>📌 To-Do List</h3>
+                <span id="notes-save-status">Synced</span>
+            </header>
+            
+            <form id="todo-form">
+                <input type="text" id="todo-input" placeholder="+ Add a task and press Enter..." autocomplete="off">
+            </form>
+
+            <ul id="todo-list"></ul>
+        </aside>
+    </div>
+
+    <div id="message-context-menu" class="context-menu hidden">
+        <button id="menu-edit-btn">✏️ Edit</button>
+        <button id="menu-select-btn">☑️ Select</button>
+        <button id="menu-delete-btn" class="menu-danger">🗑️ Delete</button>
+    </div>
+
+    <div id="folder-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 id="folder-modal-title">Folder Settings</h3>
+            <div id="folder-modal-body"></div>
+            <div class="modal-actions">
+                <button id="close-folder-modal-btn" class="action-btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="sync-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>App Settings</h3>
+            
+            <label for="theme-select">🎨 Color Theme:</label>
+            <select id="theme-select">
+                <option value="default">Classic (Teal & Clean Grey)</option>
+                <option value="black-red">1. Black & Crimson Red</option>
+                <option value="blue">2. Light & Dark Blue</option>
+                <option value="yellow-orange">3. Yellow & Orange</option>
+                <option value="pink-purple">4. Pink & Deep Purple</option>
+                <option value="black-white">5. Velvet OLED (Black & White)</option>
+            </select>
+
+            <label for="gh-token-input" style="margin-top: 8px;">GitHub Token (needs "repo" scope):</label>
+            <input type="password" id="gh-token-input" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off">
+            
+            <label for="gh-repo-input">Storage Repository (owner/repo):</label>
+            <input type="text" id="gh-repo-input" placeholder="e.g. yourname/self-chat-data" autocomplete="off" autocapitalize="none">
+            
+            <div class="modal-actions">
+                <button id="save-sync-btn">Save Settings</button>
+                <button id="pull-btn" style="background: #10b981; color: white;">📥 Pull from Cloud</button>
+                <button id="push-btn" style="background: #f59e0b; color: white;">📤 Push to Cloud</button>
+                <button id="run-sync-btn">Sync Now 🔄</button>
+                <button id="close-modal-btn">Close</button>
+            </div>
+            <p id="sync-status"></p>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden">Message copied</div>
+
+    <script src="localforage.min.js"></script>
+    <script src="app.js?v=21"></script>
+</body>
 </html>
