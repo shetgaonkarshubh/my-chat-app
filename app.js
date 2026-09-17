@@ -507,8 +507,8 @@ function renderMessages() {
 // ==========================================
 
 function getRepoConfig() {
-    const token = (localStorage.getItem('gh_token') || '').replace(/\s+/g, '');
-    let repo = (localStorage.getItem('gh_repo') || '').replace(/\s+/g, '');
+    const token = (localStorage.getItem('gh_token') || '').trim();
+    let repo = (localStorage.getItem('gh_repo') || '').trim();
     repo = repo.replace(/^https?:\/\/github\.com\//, '').replace(/\/$/, '');
     return { token, repo };
 }
@@ -552,10 +552,8 @@ async function commitDbJson(dbObject) {
     const { token, repo } = getRepoConfig();
     if (!token || !repo) return;
 
-    // --- SAFETY CHECK: Ensure todos are attached from local storage if missing ---
     if (!dbObject.todos || dbObject.todos.length === 0) {
         try {
-            // Check common local storage keys where todos might be hiding
             const localTodos = localStorage.getItem('todos') || localStorage.getItem('self_chat_todos');
             if (localTodos) {
                 dbObject.todos = JSON.parse(localTodos);
@@ -566,7 +564,6 @@ async function commitDbJson(dbObject) {
             console.warn("Could not auto-recover todos from local storage", e);
         }
     }
-    // --------------------------------------------------------------------------
 
     const path = 'db.json';
     const url = `https://api.github.com/repos/${repo}/contents/${path}`;
@@ -644,14 +641,12 @@ async function explicitPull() {
         const fileData = await res.json();
         const decoded = JSON.parse(decodeBase64(fileData.content.replace(/\s/g, '')));
 
-        // Overwrite local memory and save
         db = decoded;
         saveData();
 
-        // Refresh UI
         if (typeof renderRooms === 'function') renderRooms();
+        if (typeof renderMessages === 'function') renderMessages();
         if (typeof renderTodos === 'function') renderTodos();
-        if (typeof renderNotes === 'function') renderNotes();
         if (typeof loadActiveRoom === 'function') loadActiveRoom();
 
         if (statusEl) statusEl.textContent = `Pulled successfully! (${new Date().toLocaleTimeString()})`;
@@ -679,7 +674,6 @@ async function explicitPush() {
     const maxAttempts = 5;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-            // 1. Fetch the exact live SHA right now
             let sha = null;
             const getRes = await fetch(`${url}?ref=main&_nocache=${Date.now()}_${Math.random()}`, {
                 headers: {
@@ -693,7 +687,6 @@ async function explicitPush() {
                 sha = fileData.sha;
             }
 
-            // 2. Send PUT request
             const payload = {
                 message: `Manual explicit push: ${new Date().toISOString()}`,
                 content: content
@@ -716,7 +709,6 @@ async function explicitPush() {
                 return;
             }
 
-            // If it hits a 409 conflict, wait 300ms and retry with the new SHA
             if (putRes.status === 409 && attempt < maxAttempts) {
                 console.warn(`Attempt ${attempt} hit a 409 conflict. Retrying with fresh SHA...`);
                 await new Promise(res => setTimeout(res, 300));
@@ -745,7 +737,6 @@ async function runRepoSync(isSilent = false) {
     if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
 
     try {
-        // Bypass CORS penalty cache & adblockers with a random string
         const reqId = Math.random().toString(36).substring(2, 10);
         const checkUrl = `https://api.github.com/repos/${repo}/contents/db.json?req_id=${reqId}`;
         
@@ -1189,8 +1180,6 @@ function loadSyncCredentials() {
     if (repoInput) repoInput.value = repo;
 }
 
-
-// Redirect old Gist aliases internally just in case they're called
 function runGistSync(isSilent) { return runRepoSync(isSilent); }
 
 function startAutoSync() {
@@ -1382,13 +1371,6 @@ function attachEventListeners() {
         };
     }
 
-    const syncModal = document.getElementById('sync-modal');
-    const syncSettingsBtn = document.getElementById('sync-settings-btn');
-    if (syncSettingsBtn && syncModal) syncSettingsBtn.onclick = () => syncModal.classList.remove('hidden');
-
-    const closeModalBtn = document.getElementById('close-modal-btn');
-    if (closeModalBtn && syncModal) closeModalBtn.onclick = () => syncModal.classList.add('hidden');
-
     const saveSyncBtn = document.getElementById('save-sync-btn');
     if (saveSyncBtn) {
         saveSyncBtn.onclick = () => {
@@ -1403,20 +1385,6 @@ function attachEventListeners() {
             const statusEl = document.getElementById('sync-status');
             if (statusEl) statusEl.textContent = "Settings saved!";
             runRepoSync(false);
-        };
-    }
-    const forcePushBtn = document.getElementById('force-push-btn');
-    if (forcePushBtn) {
-        forcePushBtn.onclick = async () => {
-            const statusEl = document.getElementById('sync-status');
-            if (statusEl) statusEl.textContent = "Force pushing current device data...";
-            try {
-                await commitDbJson(db); // Push local db directly without GET merge!
-                if (statusEl) statusEl.textContent = `Force Synced! (${getCurrentTimeStr()})`;
-                showToast("Successfully pushed local data!");
-            } catch (err) {
-                if (statusEl) statusEl.textContent = 'Force Push failed: ' + err.message;
-            }
         };
     }
 
@@ -1507,7 +1475,7 @@ if (document.readyState === 'loading') {
     initApp();
 }
 
-// FORCE Nuke the Service Worker
+// Nuke Service Worker
 if ('serviceWorker' in navigator) { 
     navigator.serviceWorker.getRegistrations().then(function(registrations) {
         for(let registration of registrations) {
@@ -1516,21 +1484,13 @@ if ('serviceWorker' in navigator) {
     });
 }
 
-// Bind explicit pull and push buttons once the DOM is fully loaded
+// Bind explicit pull and push buttons
 document.addEventListener('DOMContentLoaded', () => {
     const pullBtn = document.getElementById('pull-btn');
     const pushBtn = document.getElementById('push-btn');
 
-    if (pullBtn) {
-        pullBtn.addEventListener('click', explicitPull);
-    }
-    if (pushBtn) {
-        pushBtn.addEventListener('click', explicitPush);
-    }
-});
-
-document.getElementById('open-sync-modal-btn')?.addEventListener('click', () => {
-    document.getElementById('sync-modal').classList.remove('hidden');
+    if (pullBtn) pullBtn.addEventListener('click', explicitPull);
+    if (pushBtn) pushBtn.addEventListener('click', explicitPush);
 });
 
 document.addEventListener('click', (e) => {
