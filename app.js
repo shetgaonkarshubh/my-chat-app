@@ -549,19 +549,23 @@ async function uploadMediaToRepo(file) {
     return json.content.download_url;
 }
 
-async function commitDbJson(dbObject) {
+
+
+async function handleFileUpload(file) {
+    if (!file) return;
+    if (!db.activeRoom) db.activeRoom = Object.keys(db.rooms)[0] || "General Stuff";
+
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');async function commitDbJson(dbObject, retryCount = 0) {
     const { token, repo } = getRepoConfig();
     if (!token || !repo) return;
 
     const path = 'db.json';
     const url = `https://api.github.com/repos/${repo}/contents/${path}`;
     
-    // Force bypass browser cache to get the absolute latest SHA
-    const checkUrl = `${url}?nocache=${Date.now()}`;
-
     let sha = null;
     try {
-        const checkRes = await fetch(checkUrl, {
+        const checkRes = await fetch(`${url}?nocache=${Date.now()}`, {
             method: 'GET',
             headers: { 
                 'Authorization': 'token ' + token,
@@ -574,7 +578,7 @@ async function commitDbJson(dbObject) {
             sha = fileInfo.sha;
         }
     } catch (e) {
-        console.log("No existing file to update. Proceeding to create fresh db.json.");
+        console.log("Could not fetch SHA, proceeding without it.");
     }
 
     const jsonStr = JSON.stringify(dbObject, null, 2);
@@ -596,18 +600,17 @@ async function commitDbJson(dbObject) {
         body: JSON.stringify(payload)
     });
 
+    // The Magic Fix: Auto-retry on 409 Conflict
+    if (pushRes.status === 409 && retryCount < 3) {
+        console.warn("GitHub SHA conflict (409). Retrying with fresh SHA...");
+        return await commitDbJson(dbObject, retryCount + 1);
+    }
+
     if (!pushRes.ok) {
         const err = await pushRes.json().catch(() => ({}));
-        throw new Error(err.message || `Sync failed (${pushRes.status})`);
+        throw new Error(err.message || `HTTP ${pushRes.status}`);
     }
-}
-
-async function handleFileUpload(file) {
-    if (!file) return;
-    if (!db.activeRoom) db.activeRoom = Object.keys(db.rooms)[0] || "General Stuff";
-
-    const isImage = file.type.startsWith('image/');
-    const isVideo = file.type.startsWith('video/');
+}Freo
     const isAudio = file.type.startsWith('audio/');
 
     const statusEl = document.getElementById('sync-status');
@@ -1018,39 +1021,33 @@ async function runRepoSync(isSilent = false) {
     try {
         const url = `https://api.github.com/repos/${repo}/contents/db.json?nocache=${Date.now()}`;
         
-        let res;
         try {
-            res = await fetch(url, {
+            const res = await fetch(url, {
                 method: 'GET',
-                headers: { 'Authorization': `Bearer ${token}`,'Accept': 'application/vnd.github.v3+json'}
+                headers: { 
+                    'Authorization': 'token ' + token,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
             });
-        } catch (networkErr) {
-            console.warn("GET request blocked (CORS 404 block). Forcing initialization...");
-            // Force initialization if Firefox killed the GET request completely
-            await commitDbJson(db);
-            if (statusEl) statusEl.textContent = `Synced (Initialized)`;
-            return;
-        }
 
-        if (res.status === 401 || res.status === 403) {
-            throw new Error("Bad credentials. Check your GitHub Token.");
-        }
-
-        if (res.ok) {
-            const fileData = await res.json();
-            if (fileData.content) {
-                const decodedJson = decodeBase64(fileData.content.replace(/\s/g, ''));
-                const remoteDb = JSON.parse(decodedJson);
-                db = mergeDatabases(db, remoteDb);
-                saveData();
-                renderRooms();
-                renderMessages();
-                renderTodos();
+            if (res.status === 401 || res.status === 403) {
+                throw new Error("Bad credentials. Check your GitHub Token.");
             }
-        } else if (res.status === 404) {
-            console.log("No db.json found on remote. Creating new file...");
-        } else {
-            throw new Error(`HTTP Error: ${res.status}`);
+
+            if (res.ok) {
+                const fileData = await res.json();
+                if (fileData.content) {
+                    const decodedJson = decodeBase64(fileData.content.replace(/\s/g, ''));
+                    const remoteDb = JSON.parse(decodedJson);
+                    db = mergeDatabases(db, remoteDb);
+                    saveData();
+                    renderRooms();
+                    renderMessages();
+                    renderTodos();
+                }
+            }
+        } catch (networkErr) {
+            console.warn("GET request failed. Moving straight to PUT...", networkErr);
         }
 
         await commitDbJson(db);
