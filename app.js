@@ -548,7 +548,7 @@ async function uploadMediaToRepo(file) {
     return json.content.download_url;
 }
 
-async function commitDbJson(dbObject, retryCount = 0) {
+async function commitDbJson(dbObject) {
     const { token, repo } = getRepoConfig();
     if (!token || !repo) return;
 
@@ -557,8 +557,8 @@ async function commitDbJson(dbObject, retryCount = 0) {
     
     let sha = null;
     try {
-        // Removed the ?nocache tracking trigger
-        const checkRes = await fetch(url, {
+        // Safe cache-buster (?v=) bypasses GitHub CDN without triggering adblockers!
+        const checkRes = await fetch(`${url}?v=${Date.now()}`, {
             method: 'GET',
             cache: 'no-store',
             headers: { 
@@ -595,15 +595,68 @@ async function commitDbJson(dbObject, retryCount = 0) {
         body: JSON.stringify(payload)
     });
 
-    if (pushRes.status === 409 && retryCount < 3) {
-        console.warn("GitHub SHA conflict (409). Retrying with fresh SHA...");
-        await new Promise(r => setTimeout(r, 1000));
-        return await commitDbJson(dbObject, retryCount + 1);
+    // Safe failure: Do not blindly overwrite data!
+    if (pushRes.status === 409) {
+        throw new Error("Conflict (409) - New data exists on GitHub. Click Sync again to pull and merge changes!");
     }
 
     if (!pushRes.ok) {
         const err = await pushRes.json().catch(() => ({}));
         throw new Error(err.message || `HTTP ${pushRes.status}`);
+    }
+}
+
+async function runRepoSync(isSilent = false) {
+    const statusEl = document.getElementById('sync-status');
+    const { token, repo } = getRepoConfig();
+
+    if (!token || !repo) {
+        if (statusEl && !isSilent) statusEl.textContent = "Token or Repo missing in Settings.";
+        return;
+    }
+
+    if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
+
+    try {
+        // Safe cache-buster (?v=) bypasses GitHub CDN
+        const url = `https://api.github.com/repos/${repo}/contents/db.json?v=${Date.now()}`;
+        
+        try {
+            const res = await fetch(url, {
+                method: 'GET',
+                cache: 'no-store',
+                headers: { 
+                    'Authorization': 'token ' + token,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (res.status === 401 || res.status === 403) {
+                throw new Error("Bad credentials. Check your GitHub Token.");
+            }
+
+            if (res.ok) {
+                const fileData = await res.json();
+                if (fileData.content) {
+                    const decodedJson = decodeBase64(fileData.content.replace(/\s/g, ''));
+                    const remoteDb = JSON.parse(decodedJson);
+                    db = mergeDatabases(db, remoteDb);
+                    saveData();
+                    renderRooms();
+                    renderMessages();
+                    renderTodos();
+                }
+            }
+        } catch (networkErr) {
+            console.warn("GET request failed. Moving straight to PUT...", networkErr);
+        }
+
+        await commitDbJson(db);
+
+        if (statusEl) statusEl.textContent = `Synced (${getCurrentTimeStr()})`;
+    } catch (err) {
+        console.error("Repo sync error:", err);
+        if (statusEl && !isSilent) statusEl.textContent = 'Sync failed: ' + err.message;
     }
 }
 
@@ -1009,59 +1062,6 @@ function loadSyncCredentials() {
     if (repoInput) repoInput.value = repo;
 }
 
-async function runRepoSync(isSilent = false) {
-    const statusEl = document.getElementById('sync-status');
-    const { token, repo } = getRepoConfig();
-
-    if (!token || !repo) {
-        if (statusEl && !isSilent) statusEl.textContent = "Token or Repo missing in Settings.";
-        return;
-    }
-
-    if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
-
-    try {
-        // Removed the ?nocache tracking trigger
-        const url = `https://api.github.com/repos/${repo}/contents/db.json`;
-        
-        try {
-            const res = await fetch(url, {
-                method: 'GET',
-                cache: 'no-store',
-                headers: { 
-                    'Authorization': 'token ' + token,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-            });
-
-            if (res.status === 401 || res.status === 403) {
-                throw new Error("Bad credentials. Check your GitHub Token.");
-            }
-
-            if (res.ok) {
-                const fileData = await res.json();
-                if (fileData.content) {
-                    const decodedJson = decodeBase64(fileData.content.replace(/\s/g, ''));
-                    const remoteDb = JSON.parse(decodedJson);
-                    db = mergeDatabases(db, remoteDb);
-                    saveData();
-                    renderRooms();
-                    renderMessages();
-                    renderTodos();
-                }
-            }
-        } catch (networkErr) {
-            console.warn("GET request failed. Moving straight to PUT...", networkErr);
-        }
-
-        await commitDbJson(db);
-
-        if (statusEl) statusEl.textContent = `Synced (${getCurrentTimeStr()})`;
-    } catch (err) {
-        console.error("Repo sync error:", err);
-        if (statusEl && !isSilent) statusEl.textContent = 'Sync failed: ' + err.message;
-    }
-}
 
 // Redirect old Gist aliases internally just in case they're called
 function runGistSync(isSilent) { return runRepoSync(isSilent); }
