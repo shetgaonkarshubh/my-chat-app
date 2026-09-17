@@ -552,12 +552,27 @@ async function commitDbJson(dbObject) {
     const { token, repo } = getRepoConfig();
     if (!token || !repo) return;
 
+    // --- SAFETY CHECK: Ensure todos are attached from local storage if missing ---
+    if (!dbObject.todos || dbObject.todos.length === 0) {
+        try {
+            // Check common local storage keys where todos might be hiding
+            const localTodos = localStorage.getItem('todos') || localStorage.getItem('self_chat_todos');
+            if (localTodos) {
+                dbObject.todos = JSON.parse(localTodos);
+            } else if (typeof todos !== 'undefined' && Array.isArray(todos) && todos.length > 0) {
+                dbObject.todos = todos;
+            }
+        } catch (e) {
+            console.warn("Could not auto-recover todos from local storage", e);
+        }
+    }
+    // --------------------------------------------------------------------------
+
     const path = 'db.json';
     const url = `https://api.github.com/repos/${repo}/contents/${path}`;
     
     let sha = null;
     try {
-        // Bypass CORS penalty cache & adblockers with a random string
         const reqId = Math.random().toString(36).substring(2, 10);
         const checkRes = await fetch(`${url}?req_id=${reqId}`, {
             method: 'GET',
