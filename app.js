@@ -1507,3 +1507,7 @@ document.addEventListener('DOMContentLoaded', () => {
         pushBtn.addEventListener('click', explicitPush);
     }
 });
+
+document.getElementById('open-sync-modal-btn')?.addEventListener('click', () => {
+    document.getElementById('sync-modal').classList.remove('hidden');
+});
