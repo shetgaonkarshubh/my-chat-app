@@ -1511,3 +1511,12 @@ document.addEventListener('DOMContentLoaded', () => {
 document.getElementById('open-sync-modal-btn')?.addEventListener('click', () => {
     document.getElementById('sync-modal').classList.remove('hidden');
 });
+
+document.addEventListener('click', (e) => {
+    if (e.target.closest('#open-sync-modal-btn')) {
+        document.getElementById('sync-modal').classList.remove('hidden');
+    }
+    if (e.target.closest('#close-modal-btn')) {
+        document.getElementById('sync-modal').classList.add('hidden');
+    }
+});
