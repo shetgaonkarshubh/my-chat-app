@@ -584,6 +584,7 @@ async function commitDbJson(dbObject) {
         method: 'PUT',
         headers: {
             'Authorization': `Bearer ${token}`,
+            'Accept': 'application/vnd.github.v3+json',
             'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
@@ -1015,7 +1016,7 @@ async function runRepoSync(isSilent = false) {
         try {
             res = await fetch(url, {
                 method: 'GET',
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { 'Authorization': `Bearer ${token}`,'Accept': 'application/vnd.github.v3+json'}
             });
         } catch (networkErr) {
             console.warn("GET request blocked (CORS 404 block). Forcing initialization...");
