@@ -23,7 +23,8 @@
                 <div class="header-actions">
                     <button id="add-folder-btn" title="Create Folder">📁+</button>
                     <button id="add-room-btn" title="Create Chat">✦ New</button>
-                    <button id="sync-settings-btn" title="Settings">⚙️</button>
+                    <button id="pull-btn" class="folder-action-item" style="background: #10b981; color: white;">📥 Pull from Cloud</button>
+                    <button id="push-btn" class="folder-action-item" style="background: #f59e0b; color: white;">📤 Push to Cloud</button>
                 </div>
             </header>
             <ul id="room-list"></ul>
@@ -124,6 +125,6 @@
     <div id="toast" class="toast hidden">Message copied</div>
 
     <script src="localforage.min.js"></script>
-    <script src="app.js?v=19"></script>
+    <script src="app.js?v=20"></script>
 </body>
 </html>

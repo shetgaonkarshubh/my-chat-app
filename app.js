@@ -619,6 +619,99 @@ async function commitDbJson(dbObject) {
     }
 }
 
+// --- 📥 EXPLICIT PULL: Download whatever is on GitHub right now and overwrite local state ---
+async function explicitPull() {
+    const { token, repo } = getRepoConfig();
+    if (!token || !repo) {
+        alert("Please set your GitHub Token and Repository first!");
+        return;
+    }
+    
+    const statusEl = document.getElementById('sync-status');
+    if (statusEl) statusEl.textContent = "Pulling from GitHub...";
+
+    try {
+        const url = `https://api.github.com/repos/${repo}/contents/db.json?t=${Date.now()}`;
+        const res = await fetch(url, {
+            headers: { 
+                'Authorization': 'token ' + token, 
+                'Accept': 'application/vnd.github.v3+json' 
+            }
+        });
+
+        if (!res.ok) throw new Error("Failed to fetch from GitHub (HTTP " + res.status + ")");
+
+        const fileData = await res.json();
+        const decoded = JSON.parse(decodeBase64(fileData.content.replace(/\s/g, '')));
+
+        // Overwrite local memory and save
+        db = decoded;
+        saveData();
+
+        // Refresh UI
+        if (typeof renderRooms === 'function') renderRooms();
+        if (typeof renderTodos === 'function') renderTodos();
+        if (typeof renderNotes === 'function') renderNotes();
+        if (typeof loadActiveRoom === 'function') loadActiveRoom();
+
+        if (statusEl) statusEl.textContent = `Pulled successfully! (${new Date().toLocaleTimeString()})`;
+        console.log("📥 Pull complete. Local state updated from GitHub.");
+    } catch (err) {
+        if (statusEl) statusEl.textContent = 'Pull failed: ' + err.message;
+        console.error(err);
+    }
+}
+
+// --- 📤 EXPLICIT PUSH: Force upload current local state to GitHub, ignoring conflicts ---
+async function explicitPush() {
+    const { token, repo } = getRepoConfig();
+    if (!token || !repo) {
+        alert("Please set your GitHub Token and Repository first!");
+        return;
+    }
+
+    const statusEl = document.getElementById('sync-status');
+    if (statusEl) statusEl.textContent = "Pushing to GitHub...";
+
+    try {
+        const url = `https://api.github.com/repos/${repo}/contents/db.json`;
+
+        // Get absolute latest SHA right now
+        let sha = null;
+        const getRes = await fetch(`${url}?t=${Date.now()}`, {
+            headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github.v3+json' }
+        });
+        if (getRes.ok) {
+            const data = await getRes.json();
+            sha = data.sha;
+        }
+
+        const payload = {
+            message: `Manual explicit push: ${new Date().toISOString()}`,
+            content: encodeBase64(JSON.stringify(db, null, 2))
+        };
+        if (sha) payload.sha = sha;
+
+        const putRes = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Authorization': 'token ' + token,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!putRes.ok) throw new Error(await putRes.text());
+
+        if (statusEl) statusEl.textContent = `Pushed successfully! (${new Date().toLocaleTimeString()})`;
+        console.log("📤 Push complete. Local state forced to GitHub.");
+    } catch (err) {
+        if (statusEl) statusEl.textContent = 'Push failed: ' + err.message;
+        console.error(err);
+    }
+}
+
 async function runRepoSync(isSilent = false) {
     const statusEl = document.getElementById('sync-status');
     const { token, repo } = getRepoConfig();
@@ -1401,3 +1494,16 @@ if ('serviceWorker' in navigator) {
         }
     });
 }
+
+// Bind explicit pull and push buttons once the DOM is fully loaded
+document.addEventListener('DOMContentLoaded', () => {
+    const pullBtn = document.getElementById('pull-btn');
+    const pushBtn = document.getElementById('push-btn');
+
+    if (pullBtn) {
+        pullBtn.addEventListener('click', explicitPull);
+    }
+    if (pushBtn) {
+        pushBtn.addEventListener('click', explicitPush);
+    }
+});
