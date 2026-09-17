@@ -555,12 +555,18 @@ async function commitDbJson(dbObject) {
 
     const path = 'db.json';
     const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+    
+    // Force bypass browser cache to get the absolute latest SHA
+    const checkUrl = `${url}?nocache=${Date.now()}`;
 
     let sha = null;
     try {
-        const checkRes = await fetch(url, {
+        const checkRes = await fetch(checkUrl, {
             method: 'GET',
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: { 
+                'Authorization': 'token ' + token,
+                'Accept': 'application/vnd.github.v3+json'
+            }
         });
 
         if (checkRes.ok) {
@@ -583,7 +589,7 @@ async function commitDbJson(dbObject) {
     const pushRes = await fetch(url, {
         method: 'PUT',
         headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': 'token ' + token,
             'Accept': 'application/vnd.github.v3+json',
             'Content-Type': 'application/json'
         },
