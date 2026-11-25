@@ -2,7 +2,7 @@
 
 An offline-first, private personal messaging and organization workspace disguised as a modern chat app. 
 
-Instead of messaging other people, **Self Chat Space** lets you message yourself to log thoughts, store notes, upload files and media, manage tasks, and organize conversations into structured folders—with a serverless cloud sync engine powered by your own GitHub repository.
+Instead of messaging other people, **Self Chat Space** lets you message yourself to log thoughts, store notes, upload files and media, manage tasks, and organize conversations into structured folders—with an always-on, real-time cloud sync engine powered by **Supabase** (Free Tier).
 
 ---
 
@@ -41,15 +41,12 @@ Interacting with messages is optimized for mobile and desktop:
 - Check off completed items or delete finished tasks.
 - Fully synchronized across your devices.
 
-### ☁️ Serverless Cloud Sync (GitHub Powered)
-Turn any personal GitHub repository into your private cloud backend—**no paid servers or third-party databases required**:
-- **JSON Database Snapshot**: Stores your chat history, rooms, folders, and to-do lists in `db.json` inside your private GitHub repository.
-- **Media Asset Storage**: Uploads images and files directly to a `/media/` folder in your repo via the GitHub Contents API.
-- **Two-Way Conflict-Free Merge**: Intelligently combines local and remote records using tombstone deletion tracking (`deleted`, `deletedFolders`, `deletedTodos`) and timestamp resolution (`updatedAt`).
-- **Manual Control**:
-  - **📥 Pull from Cloud**: Overwrite local state with the latest remote data.
-  - **📤 Push to Cloud**: Force upload local state to GitHub.
-  - **🔄 Sync Now**: Run full two-way merge.
+### ☁️ Real-Time Cloud Sync (Supabase Powered)
+Sync your chats, folders, to-dos, and files across your phone and laptop 24/7 for free:
+- **PostgreSQL + Row Level Security (RLS)**: Stores folders, rooms, messages, and to-dos as individual rows scoped strictly to your account (`auth.uid() = user_id`).
+- **Private Media Storage**: Uploads images, videos, audio, and files to a private `self-chat-media` Supabase Storage bucket using signed URLs.
+- **Instant Realtime Sync**: Uses Supabase Realtime WebSockets so messages and to-dos created on your phone appear on your laptop in under a second.
+- **Offline-First**: Everything is cached locally in IndexedDB (`localforage`) and syncs automatically when you reconnect.
 
 ### 🎨 6 Aesthetic Color Themes
 Easily switch between themes from the Settings (`⚙️`) modal:
@@ -162,26 +159,21 @@ Right-click `index.html` and click **"Open with Live Server"**.
 
 ---
 
-### 2. Configure GitHub Cloud Sync
+### 2. Configure Supabase Cloud Sync (Free Tier)
 
-To sync your chats and files across devices (desktop, phone, tablet):
+To sync your chats and files across devices (phone, laptop, tablet) 24/7:
 
-1. **Create a Private GitHub Repository**:
-   - Go to [GitHub New Repository](https://github.com/new).
-   - Name it (for example, `self-chat-data`).
-   - Set visibility to **Private** and check **Add a README file** (so the default branch is created).
-2. **Generate a Personal Access Token (Classic)**:
-   - Go to **GitHub Settings** → **Developer Settings** → **Personal Access Tokens** → **Tokens (classic)**.
-   - Click **Generate new token (classic)**.
-   - Give it a descriptive note (e.g., `Self Chat App Sync`).
-   - Select the **`repo`** scope (full control of private repositories).
-   - Click **Generate token** and copy the resulting string (`ghp_...`).
+1. **Create a Free Supabase Project**:
+   - Go to [Supabase](https://supabase.com/) and create a new project.
+2. **Initialize Tables, Realtime & Storage**:
+   - Open your project's **SQL Editor** in the Supabase Dashboard.
+   - Copy and run the entire contents of [`supabase_schema.sql`](supabase_schema.sql).
 3. **Link in App Settings**:
-   - Open Self Chat in your browser.
+   - Open Self Chat in your browser (or deploy it to GitHub Pages / Cloudflare Pages).
    - Click the gear icon (**⚙️**) in the sidebar header to open **App Settings**.
-   - Paste your token into **GitHub Token**.
-   - Enter your repository in `owner/repo` format (e.g. `yourusername/self-chat-data`) into **Storage Repository**.
-   - Click **Save Settings** followed by **Sync Now 🔄** (or **Push to Cloud** if you already have local notes).
+   - Paste your **Project URL** and **Anon Public Key** (from **Project Settings → API**).
+   - Enter an email & password and click **Sign Up** on your first device (or **Sign In** on your second device).
+   - Your existing local notes are automatically pushed on sign-up, and all future changes sync in real time!
 
 ---
 

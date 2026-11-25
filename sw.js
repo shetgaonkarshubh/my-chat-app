@@ -1,4 +1,4 @@
-const CACHE_NAME = 'self-chat-v11';
+const CACHE_NAME = 'self-chat-v12';
 const ASSETS = [
   './',
   './index.html',
@@ -25,13 +25,12 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Intercept only local app assets; bypass Service Worker for GitHub API
+// Intercept only local app assets; bypass Service Worker for Supabase & external URLs
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // If request is going to GitHub API or external URLs, do NOT intercept
-  if (url.origin !== location.origin || url.hostname.includes('github')) {
-    return; // Passes straight to the network
+  if (url.origin !== location.origin || url.hostname.includes('supabase')) {
+    return;
   }
 
   e.respondWith(

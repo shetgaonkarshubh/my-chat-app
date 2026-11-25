@@ -145,7 +145,7 @@ function renderTodos() {
             item.updatedAt = Date.now();
             saveData();
             renderTodos();
-            queueSync();
+            sbUpsertTodo(item);
         };
 
         var span = document.createElement('span');
@@ -162,7 +162,7 @@ function renderTodos() {
             db.todos = db.todos.filter(function(t) { return t.id !== item.id; });
             saveData();
             renderTodos();
-            queueSync();
+            sbDeleteTodo(item.id);
         };
 
         li.appendChild(checkbox);
@@ -195,16 +195,14 @@ function initApp() {
         renderMessages(); 
         renderTodos();
         attachEventListeners();
-        loadSyncCredentials();
-        // startAutoSync(); // <-- COMMENT THIS OUT SO IT STOPS SPAMMING 401s
+        initSupabase();
     }).catch((err) => {
         console.error("LocalForage load error:", err);
         renderRooms(); 
         renderMessages(); 
         renderTodos();
         attachEventListeners();
-        loadSyncCredentials();
-        // startAutoSync(); // <-- COMMENT THIS OUT HERE TOO
+        initSupabase();
     });
 }
 
@@ -486,275 +484,447 @@ function renderMessages() {
 }
 
 // ==========================================
-// GitHub Repository Contents Engine (Files & Media)
+// Supabase Cloud & Realtime Sync Engine
 // ==========================================
 
-function getRepoConfig() {
-    const token = (localStorage.getItem('gh_token') || '').trim();
-    let repo = (localStorage.getItem('gh_repo') || '').trim();
-    repo = repo.replace(/^https?:\/\/github\.com\//, '').replace(/\/$/, '');
-    return { token, repo };
+const SB_BUCKET = 'self-chat-media';
+let sbClient = null;
+let sbUser = null;
+let sbChannel = null;
+const signedUrlCache = new Map();
+
+function getSupabaseConfig() {
+    const url = (localStorage.getItem('sb_url') || '').trim().replace(/\/$/, '');
+    const key = (localStorage.getItem('sb_key') || '').trim();
+    return { url, key };
 }
 
-async function uploadMediaToRepo(file) {
-    const { token, repo } = getRepoConfig();
-    if (!token || !repo) throw new Error("GitHub Token or Repo missing in Settings.");
-
-    const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const path = `media/${Date.now()}_${cleanName}`;
-    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
-
-    const base64Data = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.readAsDataURL(file);
-    });
-
-    const res = await fetch(url, {
-        method: 'PUT',
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            message: `Upload media: ${cleanName}`,
-            content: base64Data
-        })
-    });
-
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || `Upload failed (${res.status})`);
+function setSyncStatus(text) {
+    const statusEl = document.getElementById('sync-status');
+    if (statusEl) statusEl.textContent = text;
+    const notesStatus = document.getElementById('notes-save-status');
+    if (notesStatus && (text.startsWith('Synced') || text.startsWith('Offline') || text.startsWith('Live'))) {
+        notesStatus.textContent = text.startsWith('Offline') ? 'Offline' : 'Synced';
     }
-
-    const json = await res.json();
-    return json.content.download_url;
 }
 
-async function commitDbJson(dbObject) {
-    const { token, repo } = getRepoConfig();
-    if (!token || !repo) return;
+function updateAuthUI() {
+    const signedOutBox = document.getElementById('sb-signed-out-box');
+    const signedInBox = document.getElementById('sb-signed-in-box');
+    const userInfo = document.getElementById('sb-user-info');
+    if (!signedOutBox || !signedInBox) return;
 
-    if (!dbObject.todos || dbObject.todos.length === 0) {
-        try {
-            const localTodos = localStorage.getItem('todos') || localStorage.getItem('self_chat_todos');
-            if (localTodos) {
-                dbObject.todos = JSON.parse(localTodos);
-            } else if (typeof todos !== 'undefined' && Array.isArray(todos) && todos.length > 0) {
-                dbObject.todos = todos;
-            }
-        } catch (e) {
-            console.warn("Could not auto-recover todos from local storage", e);
-        }
+    if (sbUser) {
+        signedOutBox.classList.add('hidden');
+        signedInBox.classList.remove('hidden');
+        if (userInfo) userInfo.textContent = `Signed in as ${sbUser.email}`;
+    } else {
+        signedOutBox.classList.remove('hidden');
+        signedInBox.classList.add('hidden');
+        if (userInfo) userInfo.textContent = '';
+    }
+}
+
+async function initSupabase() {
+    const { url, key } = getSupabaseConfig();
+    const urlInput = document.getElementById('sb-url-input');
+    const keyInput = document.getElementById('sb-key-input');
+    if (urlInput) urlInput.value = url;
+    if (keyInput) keyInput.value = key;
+
+    if (!url || !key || typeof window.supabase === 'undefined') {
+        sbClient = null;
+        sbUser = null;
+        updateAuthUI();
+        return;
     }
 
-    const path = 'db.json';
-    const url = `https://api.github.com/repos/${repo}/contents/${path}`;
-    
-    let sha = null;
+    sbClient = window.supabase.createClient(url, key);
+
     try {
-        const reqId = Math.random().toString(36).substring(2, 10);
-        const checkRes = await fetch(`${url}?req_id=${reqId}`, {
-            method: 'GET',
-            headers: { 
-                'Authorization': 'token ' + token,
-                'Accept': 'application/vnd.github.v3+json'
+        const { data } = await sbClient.auth.getSession();
+        sbUser = data?.session?.user || null;
+        updateAuthUI();
+
+        if (sbUser) {
+            await syncFromSupabase();
+            subscribeRealtime();
+        }
+    } catch (err) {
+        console.error('Supabase init error:', err);
+        setSyncStatus('Offline (using local data)');
+    }
+
+    if (!window._sbVisibilityBound) {
+        window._sbVisibilityBound = true;
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && sbClient && sbUser) {
+                syncFromSupabase(true);
+            }
+        });
+        window.addEventListener('online', () => {
+            if (sbClient && sbUser) syncFromSupabase(true);
+        });
+    }
+}
+
+async function refreshSignedUrlsForMessages(msgs) {
+    if (!sbClient || !sbUser) return;
+    const paths = [];
+    msgs.forEach(m => {
+        if (m && m.filePath) paths.push(m.filePath);
+    });
+    if (paths.length === 0) return;
+
+    const uniquePaths = Array.from(new Set(paths));
+    try {
+        const { data, error } = await sbClient.storage
+            .from(SB_BUCKET)
+            .createSignedUrls(uniquePaths, 3600);
+        if (error || !data) return;
+
+        data.forEach(item => {
+            if (item.path && item.signedUrl) {
+                signedUrlCache.set(item.path, item.signedUrl);
             }
         });
 
-        if (checkRes.ok) {
-            const fileInfo = await checkRes.json();
-            sha = fileInfo.sha;
-        }
+        msgs.forEach(m => {
+            if (m && m.filePath && signedUrlCache.has(m.filePath)) {
+                m.data = signedUrlCache.get(m.filePath);
+            }
+        });
     } catch (e) {
-        console.log("Could not fetch SHA, proceeding without it.");
-    }
-
-    const jsonStr = JSON.stringify(dbObject, null, 2);
-    const contentEncoded = encodeBase64(jsonStr);
-
-    const payload = {
-        message: `Sync state: ${new Date().toISOString()}`,
-        content: contentEncoded
-    };
-    if (sha) payload.sha = sha;
-
-    const pushRes = await fetch(url, {
-        method: 'PUT',
-        headers: {
-            'Authorization': 'token ' + token,
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-    });
-
-    if (pushRes.status === 409) {
-        throw new Error("Conflict (409) - New data exists on GitHub. Click Sync again to pull and merge changes!");
-    }
-
-    if (!pushRes.ok) {
-        const err = await pushRes.json().catch(() => ({}));
-        throw new Error(err.message || `HTTP ${pushRes.status}`);
+        console.warn('Could not refresh signed URLs:', e);
     }
 }
 
-// --- 📥 EXPLICIT PULL: Download whatever is on GitHub right now and overwrite local state ---
-async function explicitPull() {
-    const { token, repo } = getRepoConfig();
-    if (!token || !repo) {
-        alert("Please set your GitHub Token and Repository first!");
-        return;
+async function uploadMediaToSupabase(file) {
+    if (!sbClient || !sbUser) {
+        throw new Error('Sign in to Supabase in Settings before uploading files.');
     }
-    
-    const statusEl = document.getElementById('sync-status');
-    if (statusEl) statusEl.textContent = "Pulling from GitHub...";
 
-    try {
-        const url = `https://api.github.com/repos/${repo}/contents/db.json?t=${Date.now()}`;
-        const res = await fetch(url, {
-            headers: { 
-                'Authorization': 'token ' + token, 
-                'Accept': 'application/vnd.github.v3+json' 
-            }
+    const cleanName = (file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = `${sbUser.id}/${Date.now()}_${cleanName}`;
+
+    const { error: uploadError } = await sbClient.storage
+        .from(SB_BUCKET)
+        .upload(filePath, file, {
+            contentType: file.type || 'application/octet-stream',
+            upsert: false
         });
 
-        if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`GitHub API Error (${res.status}): ${errText}`);
-        }
+    if (uploadError) throw uploadError;
 
-        const fileData = await res.json();
-        
-        // Ensure content exists and is valid base64
-        if (!fileData || !fileData.content) {
-            throw new Error("Invalid response structure from GitHub contents API.");
-        }
+    const { data: signedData, error: signError } = await sbClient.storage
+        .from(SB_BUCKET)
+        .createSignedUrl(filePath, 3600);
 
-        const decodedString = decodeBase64(fileData.content.replace(/\s/g, ''));
-        
-        // Double check that it starts with valid JSON characters ('{' or '[')
-        const trimmed = decodedString.trim();
-        if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-            throw new Error("Received non-JSON content from GitHub. Check if db.json path is correct.");
-        }
+    if (signError) throw signError;
 
-        db = JSON.parse(trimmed);
-        saveData();
-
-        if (typeof renderRooms === 'function') renderRooms();
-        if (typeof renderMessages === 'function') renderMessages();
-        if (typeof renderTodos === 'function') renderTodos();
-        if (typeof loadActiveRoom === 'function') loadActiveRoom();
-
-        if (statusEl) statusEl.textContent = `Pulled successfully! (${new Date().toLocaleTimeString()})`;
-        console.log("📥 Pull complete. Local state updated from GitHub.");
-    } catch (err) {
-        if (statusEl) statusEl.textContent = 'Pull failed: ' + err.message;
-        console.error("Pull error details:", err);
-    }
+    signedUrlCache.set(filePath, signedData.signedUrl);
+    return { filePath, signedUrl: signedData.signedUrl };
 }
-// --- 📤 EXPLICIT PUSH: Force upload current local state to GitHub, ignoring conflicts ---
-async function explicitPush() {
-    const { token, repo } = getRepoConfig();
-    if (!token || !repo) {
-        alert("Please set your GitHub Token and Repository first!");
+
+async function syncFromSupabase(isSilent = false) {
+    if (!sbClient || !sbUser) {
+        if (!isSilent) setSyncStatus('Sign in to Supabase in Settings.');
         return;
     }
 
-    const statusEl = document.getElementById('sync-status');
-    if (statusEl) statusEl.textContent = "Pushing to GitHub...";
+    if (!isSilent) setSyncStatus('Syncing...');
 
     try {
-        const url = `https://api.github.com/repos/${repo}/contents/db.json`;
+        const [foldersRes, roomsRes, msgsRes, todosRes] = await Promise.all([
+            sbClient.from('folders').select('*').order('created_at', { ascending: true }),
+            sbClient.from('rooms').select('*').order('created_at', { ascending: true }),
+            sbClient.from('messages').select('*').order('updated_at', { ascending: true }),
+            sbClient.from('todos').select('*').order('updated_at', { ascending: false })
+        ]);
 
-        // Get absolute latest SHA
-        let sha = null;
-        const getRes = await fetch(url, {
-            headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github.v3+json' }
+        if (foldersRes.error) throw foldersRes.error;
+        if (roomsRes.error) throw roomsRes.error;
+        if (msgsRes.error) throw msgsRes.error;
+        if (todosRes.error) throw todosRes.error;
+
+        const remoteFolders = (foldersRes.data || []).map(f => f.name);
+        const remoteRoomsObj = {};
+        const remoteRoomFolders = {};
+
+        (roomsRes.data || []).forEach(r => {
+            remoteRoomsObj[r.name] = [];
+            if (r.folder) remoteRoomFolders[r.name] = r.folder;
         });
-        if (getRes.ok) {
-            const data = await getRes.json();
-            sha = data.sha;
+
+        const allMsgs = (msgsRes.data || []).map(m => {
+            const msgObj = {
+                id: m.id,
+                type: m.type || 'text',
+                text: m.text || '',
+                filePath: m.file_path || undefined,
+                fileName: m.file_name || undefined,
+                fileSize: m.file_size || undefined,
+                fileType: m.file_type || undefined,
+                data: m.file_path ? (signedUrlCache.get(m.file_path) || '') : undefined,
+                timestamp: m.timestamp || '',
+                edited: !!m.edited,
+                updatedAt: m.updated_at || Date.now()
+            };
+            if (!remoteRoomsObj[m.room]) remoteRoomsObj[m.room] = [];
+            remoteRoomsObj[m.room].push(msgObj);
+            return msgObj;
+        });
+
+        await refreshSignedUrlsForMessages(allMsgs);
+
+        if (Object.keys(remoteRoomsObj).length === 0) {
+            remoteRoomsObj['General Stuff'] = [];
         }
 
-        const payload = {
-            message: `Manual explicit push: ${new Date().toISOString()}`,
-            content: encodeBase64(JSON.stringify(db, null, 2))
+        const remoteTodos = (todosRes.data || []).map(t => ({
+            id: t.id,
+            text: t.text,
+            done: !!t.done,
+            updatedAt: t.updated_at || Date.now()
+        }));
+
+        const activeRoom = (db.activeRoom && remoteRoomsObj[db.activeRoom])
+            ? db.activeRoom
+            : Object.keys(remoteRoomsObj)[0];
+
+        db = {
+            rooms: remoteRoomsObj,
+            activeRoom,
+            deleted: [],
+            folders: remoteFolders,
+            deletedFolders: [],
+            roomFolders: remoteRoomFolders,
+            collapsedFolders: db.collapsedFolders || [],
+            todos: remoteTodos,
+            deletedTodos: []
         };
-        if (sha) payload.sha = sha;
 
-        const putRes = await fetch(url, {
-            method: 'PUT',
-            headers: {
-                'Authorization': 'token ' + token,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
-
-        if (!putRes.ok) throw new Error(await putRes.text());
-
-        if (statusEl) statusEl.textContent = `Pushed successfully! (${new Date().toLocaleTimeString()})`;
-        console.log("📤 Push complete!");
+        saveData();
+        renderRooms();
+        renderMessages();
+        renderTodos();
+        setSyncStatus(`Synced (${getCurrentTimeStr()})`);
     } catch (err) {
-        if (statusEl) statusEl.textContent = 'Push failed: ' + err.message;
-        console.error(err);
+        console.error('Supabase sync error:', err);
+        if (!isSilent) setSyncStatus('Sync failed: ' + err.message);
     }
 }
 
-async function runRepoSync(isSilent = false) {
-    const statusEl = document.getElementById('sync-status');
-    const { token, repo } = getRepoConfig();
-
-    if (!token || !repo) {
-        if (statusEl && !isSilent) statusEl.textContent = "Token or Repo missing in Settings.";
+async function pushLocalToCloud() {
+    if (!sbClient || !sbUser) {
+        alert('Please sign in to Supabase first!');
         return;
     }
-
-    if (statusEl && !isSilent) statusEl.textContent = "Syncing...";
+    setSyncStatus('Pushing local data to cloud...');
 
     try {
-        const reqId = Math.random().toString(36).substring(2, 10);
-        const checkUrl = `https://api.github.com/repos/${repo}/contents/db.json?req_id=${reqId}`;
-        
-        try {
-            const res = await fetch(checkUrl, {
-                method: 'GET',
-                headers: { 
-                    'Authorization': 'token ' + token,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
+        const uid = sbUser.id;
+        const folderRows = (db.folders || []).map(name => ({
+            id: `${uid}::folder::${name}`,
+            user_id: uid,
+            name,
+            created_at: Date.now()
+        }));
+
+        const roomRows = Object.keys(db.rooms || {}).map(name => ({
+            id: `${uid}::room::${name}`,
+            user_id: uid,
+            name,
+            folder: (db.roomFolders && db.roomFolders[name]) || null,
+            created_at: Date.now()
+        }));
+
+        const msgRows = [];
+        Object.keys(db.rooms || {}).forEach(roomName => {
+            (db.rooms[roomName] || []).forEach(m => {
+                if (!m || !m.id) return;
+                msgRows.push({
+                    id: m.id,
+                    user_id: uid,
+                    room: roomName,
+                    type: m.type || 'text',
+                    text: m.text || null,
+                    file_path: m.filePath || null,
+                    file_name: m.fileName || null,
+                    file_size: m.fileSize || 0,
+                    file_type: m.fileType || null,
+                    timestamp: m.timestamp || '',
+                    edited: !!m.edited,
+                    updated_at: m.updatedAt || Date.now()
+                });
             });
+        });
 
-            if (res.status === 401 || res.status === 403) {
-                throw new Error("Bad credentials. Check your GitHub Token.");
-            }
+        const todoRows = (db.todos || []).map(t => ({
+            id: t.id,
+            user_id: uid,
+            text: t.text,
+            done: !!t.done,
+            updated_at: t.updatedAt || Date.now()
+        }));
 
-            if (res.ok) {
-                const fileData = await res.json();
-                if (fileData.content) {
-                    const decodedJson = decodeBase64(fileData.content.replace(/\s/g, ''));
-                    const remoteDb = JSON.parse(decodedJson);
-                    db = mergeDatabases(db, remoteDb);
-                    saveData();
-                    renderRooms();
-                    renderMessages();
-                    renderTodos();
-                }
-            }
-        } catch (networkErr) {
-            console.warn("GET request failed. Moving straight to PUT...", networkErr);
+        if (folderRows.length) {
+            const { error } = await sbClient.from('folders').upsert(folderRows);
+            if (error) throw error;
+        }
+        if (roomRows.length) {
+            const { error } = await sbClient.from('rooms').upsert(roomRows);
+            if (error) throw error;
+        }
+        if (msgRows.length) {
+            const { error } = await sbClient.from('messages').upsert(msgRows);
+            if (error) throw error;
+        }
+        if (todoRows.length) {
+            const { error } = await sbClient.from('todos').upsert(todoRows);
+            if (error) throw error;
         }
 
-        await commitDbJson(db);
-
-        if (statusEl) statusEl.textContent = `Synced (${getCurrentTimeStr()})`;
+        setSyncStatus(`Pushed to cloud! (${getCurrentTimeStr()})`);
     } catch (err) {
-        console.error("Repo sync error:", err);
-        if (statusEl && !isSilent) statusEl.textContent = 'Sync failed: ' + err.message;
+        console.error('Push failed:', err);
+        setSyncStatus('Push failed: ' + err.message);
     }
+}
+
+function subscribeRealtime() {
+    if (!sbClient || !sbUser) return;
+    if (sbChannel) {
+        sbClient.removeChannel(sbChannel);
+        sbChannel = null;
+    }
+
+    sbChannel = sbClient
+        .channel('self-chat-realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => syncFromSupabase(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => syncFromSupabase(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'folders' }, () => syncFromSupabase(true))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, () => syncFromSupabase(true))
+        .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                setSyncStatus(`Live sync active (${getCurrentTimeStr()})`);
+            }
+        });
+}
+
+// Granular cloud mutation helpers
+async function sbCreateMessage(room, msgObj) {
+    if (!sbClient || !sbUser) return;
+    const { error } = await sbClient.from('messages').upsert({
+        id: msgObj.id,
+        user_id: sbUser.id,
+        room,
+        type: msgObj.type || 'text',
+        text: msgObj.text || null,
+        file_path: msgObj.filePath || null,
+        file_name: msgObj.fileName || null,
+        file_size: msgObj.fileSize || 0,
+        file_type: msgObj.fileType || null,
+        timestamp: msgObj.timestamp || '',
+        edited: !!msgObj.edited,
+        updated_at: msgObj.updatedAt || Date.now()
+    });
+    if (error) console.error('sbCreateMessage error:', error);
+}
+
+async function sbUpdateMessage(msgObj) {
+    if (!sbClient || !sbUser) return;
+    const { error } = await sbClient
+        .from('messages')
+        .update({ text: msgObj.text, edited: true, updated_at: msgObj.updatedAt })
+        .eq('id', msgObj.id)
+        .eq('user_id', sbUser.id);
+    if (error) console.error('sbUpdateMessage error:', error);
+}
+
+async function sbDeleteMessages(msgsToDelete) {
+    if (!sbClient || !sbUser || !msgsToDelete.length) return;
+    const ids = msgsToDelete.map(m => m.id).filter(Boolean);
+    const paths = msgsToDelete.map(m => m.filePath).filter(Boolean);
+    if (paths.length) {
+        await sbClient.storage.from(SB_BUCKET).remove(paths).catch(() => {});
+    }
+    if (ids.length) {
+        const { error } = await sbClient.from('messages').delete().in('id', ids).eq('user_id', sbUser.id);
+        if (error) console.error('sbDeleteMessages error:', error);
+    }
+}
+
+async function sbUpsertTodo(item) {
+    if (!sbClient || !sbUser) return;
+    const { error } = await sbClient.from('todos').upsert({
+        id: item.id,
+        user_id: sbUser.id,
+        text: item.text,
+        done: !!item.done,
+        updated_at: item.updatedAt || Date.now()
+    });
+    if (error) console.error('sbUpsertTodo error:', error);
+}
+
+async function sbDeleteTodo(id) {
+    if (!sbClient || !sbUser) return;
+    const { error } = await sbClient.from('todos').delete().eq('id', id).eq('user_id', sbUser.id);
+    if (error) console.error('sbDeleteTodo error:', error);
+}
+
+async function sbCreateFolder(name) {
+    if (!sbClient || !sbUser) return;
+    const { error } = await sbClient.from('folders').upsert({
+        id: `${sbUser.id}::folder::${name}`,
+        user_id: sbUser.id,
+        name,
+        created_at: Date.now()
+    });
+    if (error) console.error('sbCreateFolder error:', error);
+}
+
+async function sbRenameFolder(oldName, newName) {
+    if (!sbClient || !sbUser) return;
+    await sbClient.from('folders').delete().eq('user_id', sbUser.id).eq('name', oldName);
+    await sbCreateFolder(newName);
+    await sbClient.from('rooms').update({ folder: newName }).eq('user_id', sbUser.id).eq('folder', oldName);
+}
+
+async function sbDeleteFolder(name) {
+    if (!sbClient || !sbUser) return;
+    await sbClient.from('folders').delete().eq('user_id', sbUser.id).eq('name', name);
+    await sbClient.from('rooms').update({ folder: null }).eq('user_id', sbUser.id).eq('folder', name);
+}
+
+async function sbCreateRoom(name, folder = null) {
+    if (!sbClient || !sbUser) return;
+    const { error } = await sbClient.from('rooms').upsert({
+        id: `${sbUser.id}::room::${name}`,
+        user_id: sbUser.id,
+        name,
+        folder: folder || null,
+        created_at: Date.now()
+    });
+    if (error) console.error('sbCreateRoom error:', error);
+}
+
+async function sbUpdateRoomFolder(name, folder) {
+    if (!sbClient || !sbUser) return;
+    await sbClient.from('rooms').update({ folder: folder || null }).eq('user_id', sbUser.id).eq('name', name);
+}
+
+async function sbRenameRoom(oldName, newName, folder = null) {
+    if (!sbClient || !sbUser) return;
+    await sbClient.from('rooms').delete().eq('user_id', sbUser.id).eq('name', oldName);
+    await sbCreateRoom(newName, folder);
+    await sbClient.from('messages').update({ room: newName }).eq('user_id', sbUser.id).eq('room', oldName);
+}
+
+async function sbDeleteRoom(name) {
+    if (!sbClient || !sbUser) return;
+    await sbClient.from('rooms').delete().eq('user_id', sbUser.id).eq('name', name);
+    await sbClient.from('messages').delete().eq('user_id', sbUser.id).eq('room', name);
 }
 
 async function handleFileUpload(file) {
@@ -765,16 +935,15 @@ async function handleFileUpload(file) {
     const isVideo = file.type.startsWith('video/');
     const isAudio = file.type.startsWith('audio/');
 
-    const statusEl = document.getElementById('sync-status');
-    if (statusEl) statusEl.textContent = "Uploading file...";
+    setSyncStatus("Uploading file...");
 
-    let mediaUrl = '';
+    let uploadRes;
     try {
-        mediaUrl = await uploadMediaToRepo(file);
+        uploadRes = await uploadMediaToSupabase(file);
     } catch (err) {
         console.error("Upload error:", err);
         showToast("Upload failed: " + err.message);
-        if (statusEl) statusEl.textContent = "Upload failed";
+        setSyncStatus("Upload failed");
         return;
     }
 
@@ -784,7 +953,8 @@ async function handleFileUpload(file) {
         fileName: file.name || (isImage ? `image_${Date.now()}.jpg` : 'file'),
         fileSize: file.size || 0,
         fileType: file.type || 'application/octet-stream',
-        data: mediaUrl,
+        filePath: uploadRes.filePath,
+        data: uploadRes.signedUrl,
         timestamp: getCurrentTimeStr(),
         updatedAt: Date.now()
     };
@@ -793,7 +963,8 @@ async function handleFileUpload(file) {
     db.rooms[db.activeRoom].push(mediaObj);
     saveData();
     renderMessages();
-    queueSync();
+    await sbCreateMessage(db.activeRoom, mediaObj);
+    setSyncStatus(`Synced (${getCurrentTimeStr()})`);
 }
 
 // ==========================================
@@ -856,7 +1027,7 @@ function openFolderConfigModal(folderName) {
                 renderRooms();
                 renderMessages();
                 modal.classList.add('hidden');
-                queueSync();
+                sbRenameFolder(folderName, clean);
             }
         };
     }
@@ -875,19 +1046,12 @@ function openFolderConfigModal(folderName) {
                 renderRooms();
                 renderMessages();
                 modal.classList.add('hidden');
-                queueSync();
+                sbDeleteFolder(folderName);
             }
         };
     }
 
     modal.classList.remove('hidden');
-}
-
-function queueSync() {
-    if (window.syncDebounceTimer) clearTimeout(window.syncDebounceTimer);
-    window.syncDebounceTimer = setTimeout(() => {
-        runRepoSync(true);
-    }, 2500);
 }
 
 function openMoveRoomModal() {
@@ -933,7 +1097,7 @@ window.assignRoomToFolder = function(room, folder) {
     renderMessages();
     const modal = document.getElementById('folder-modal');
     if (modal) modal.classList.add('hidden');
-    queueSync();
+    sbUpdateRoomFolder(room, folder);
 };
 
 function openRoomActionsMenu() {
@@ -973,7 +1137,7 @@ function openRoomActionsMenu() {
                 saveData();
                 renderRooms();
                 renderMessages();
-                queueSync();
+                sbRenameRoom(room, clean, db.roomFolders ? db.roomFolders[clean] : null);
             }
         };
     }
@@ -991,7 +1155,7 @@ function openRoomActionsMenu() {
                 saveData();
                 renderRooms();
                 renderMessages();
-                queueSync();
+                sbDeleteRoom(room);
             }
         };
     }
@@ -1049,14 +1213,19 @@ function deleteSelectedMessages() {
     if (selectedMessageIds.size === 0) return;
     if (confirm(`Delete ${selectedMessageIds.size} selected message(s)?`)) {
         if (!db.deleted) db.deleted = [];
+        const deletedMsgs = [];
         selectedMessageIds.forEach(id => db.deleted.push(id));
         db.rooms[db.activeRoom] = (db.rooms[db.activeRoom] || []).filter(msg => {
             const msgId = typeof msg === 'object' ? msg.id : null;
-            return !selectedMessageIds.has(msgId);
+            if (selectedMessageIds.has(msgId)) {
+                deletedMsgs.push(msg);
+                return false;
+            }
+            return true;
         });
         saveData();
         exitSelectionMode();
-        queueSync();
+        sbDeleteMessages(deletedMsgs);
     }
 }
 
@@ -1150,26 +1319,6 @@ function mergeDatabases(local, remote) {
     return merged;
 }
 
-function loadSyncCredentials() {
-    const token = localStorage.getItem('gh_token') || '';
-    const repo = localStorage.getItem('gh_repo') || '';
-    const tokenInput = document.getElementById('gh-token-input');
-    const repoInput = document.getElementById('gh-repo-input');
-    if (tokenInput) tokenInput.value = token;
-    if (repoInput) repoInput.value = repo;
-}
-
-function runGistSync(isSilent) { return runRepoSync(isSilent); }
-
-function startAutoSync() {
-    runRepoSync(true);
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') runRepoSync(true);
-    });
-    if (autoSyncInterval) clearInterval(autoSyncInterval);
-    autoSyncInterval = setInterval(() => runRepoSync(true), 300000);
-}
-
 // ==========================================
 // Event Listeners Registration
 // ==========================================
@@ -1189,7 +1338,6 @@ function attachEventListeners() {
             notesTimer = setTimeout(() => {
                 saveData();
                 if (notesStatus) notesStatus.textContent = "Saved";
-                queueSync();
             }, 1000);
         });
     }
@@ -1203,17 +1351,18 @@ function attachEventListeners() {
             if (!val) return;
 
             if (!db.todos) db.todos = [];
-            db.todos.unshift({
+            const todoObj = {
                 id: generateId(),
                 text: val,
                 done: false,
                 updatedAt: Date.now()
-            });
+            };
+            db.todos.unshift(todoObj);
 
             todoInput.value = '';
             saveData();
             renderTodos();
-            queueSync();
+            sbUpsertTodo(todoObj);
         };
     }
 
@@ -1263,7 +1412,7 @@ function attachEventListeners() {
                 msg.updatedAt = Date.now();
                 saveData();
                 renderMessages();
-                queueSync();
+                sbUpdateMessage(msg);
             }
         };
     }
@@ -1280,7 +1429,7 @@ function attachEventListeners() {
                 db.rooms[db.activeRoom].splice(index, 1);
                 saveData();
                 renderMessages();
-                queueSync();
+                sbDeleteMessages([msg]);
             }
         };
     }
@@ -1322,7 +1471,7 @@ function attachEventListeners() {
                     }
                     saveData();
                     renderRooms();
-                    queueSync();
+                    sbCreateFolder(cleanName);
                 } else {
                     alert("Folder already exists.");
                 }
@@ -1344,7 +1493,7 @@ function attachEventListeners() {
                     renderMessages(); 
                     const appEl = document.getElementById('app');
                     if (appEl) appEl.classList.add('show-chat');
-                    queueSync();
+                    sbCreateRoom(clean, null);
                 }
             }
         };
@@ -1352,23 +1501,97 @@ function attachEventListeners() {
 
     const saveSyncBtn = document.getElementById('save-sync-btn');
     if (saveSyncBtn) {
-        saveSyncBtn.onclick = () => {
-            const token = (document.getElementById('gh-token-input')?.value || '').trim();
-            const repo = (document.getElementById('gh-repo-input')?.value || '').trim();
+        saveSyncBtn.onclick = async () => {
+            const url = (document.getElementById('sb-url-input')?.value || '').trim().replace(/\/$/, '');
+            const key = (document.getElementById('sb-key-input')?.value || '').trim();
             const theme = document.getElementById('theme-select')?.value || 'default';
             
-            localStorage.setItem('gh_token', token);
-            localStorage.setItem('gh_repo', repo);
+            localStorage.setItem('sb_url', url);
+            localStorage.setItem('sb_key', key);
             applyTheme(theme);
             
-            const statusEl = document.getElementById('sync-status');
-            if (statusEl) statusEl.textContent = "Settings saved!";
-            runRepoSync(false);
+            setSyncStatus("Settings saved!");
+            await initSupabase();
+        };
+    }
+
+    const signInBtn = document.getElementById('sb-signin-btn');
+    if (signInBtn) {
+        signInBtn.onclick = async () => {
+            const url = (document.getElementById('sb-url-input')?.value || '').trim().replace(/\/$/, '');
+            const key = (document.getElementById('sb-key-input')?.value || '').trim();
+            const email = (document.getElementById('sb-email-input')?.value || '').trim();
+            const password = document.getElementById('sb-password-input')?.value || '';
+            if (!url || !key) { setSyncStatus("Enter Supabase URL & Anon Key first."); return; }
+            if (!email || !password) { setSyncStatus("Enter email and password."); return; }
+
+            localStorage.setItem('sb_url', url);
+            localStorage.setItem('sb_key', key);
+            if (!sbClient) sbClient = window.supabase.createClient(url, key);
+
+            setSyncStatus("Signing in...");
+            const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+            if (error) {
+                setSyncStatus("Sign in failed: " + error.message);
+                return;
+            }
+            sbUser = data.user;
+            updateAuthUI();
+            await syncFromSupabase();
+            subscribeRealtime();
+        };
+    }
+
+    const signUpBtn = document.getElementById('sb-signup-btn');
+    if (signUpBtn) {
+        signUpBtn.onclick = async () => {
+            const url = (document.getElementById('sb-url-input')?.value || '').trim().replace(/\/$/, '');
+            const key = (document.getElementById('sb-key-input')?.value || '').trim();
+            const email = (document.getElementById('sb-email-input')?.value || '').trim();
+            const password = document.getElementById('sb-password-input')?.value || '';
+            if (!url || !key) { setSyncStatus("Enter Supabase URL & Anon Key first."); return; }
+            if (!email || !password) { setSyncStatus("Enter email and password."); return; }
+
+            localStorage.setItem('sb_url', url);
+            localStorage.setItem('sb_key', key);
+            if (!sbClient) sbClient = window.supabase.createClient(url, key);
+
+            setSyncStatus("Creating account...");
+            const { data, error } = await sbClient.auth.signUp({ email, password });
+            if (error) {
+                setSyncStatus("Sign up failed: " + error.message);
+                return;
+            }
+            if (data.session) {
+                sbUser = data.user;
+                updateAuthUI();
+                await pushLocalToCloud();
+                subscribeRealtime();
+            } else {
+                setSyncStatus("Check your email to confirm your account, then Sign In.");
+            }
+        };
+    }
+
+    const signOutBtn = document.getElementById('sb-signout-btn');
+    if (signOutBtn) {
+        signOutBtn.onclick = async () => {
+            if (sbChannel && sbClient) {
+                await sbClient.removeChannel(sbChannel);
+                sbChannel = null;
+            }
+            if (sbClient) await sbClient.auth.signOut();
+            sbUser = null;
+            updateAuthUI();
+            setSyncStatus("Signed out.");
         };
     }
 
     const runSyncBtn = document.getElementById('run-sync-btn');
-    if (runSyncBtn) runSyncBtn.onclick = () => runRepoSync(false);
+    if (runSyncBtn) runSyncBtn.onclick = () => syncFromSupabase(false);
+
+    const pushBtn = document.getElementById('push-btn');
+    if (pushBtn) pushBtn.onclick = pushLocalToCloud;
 
     const mediaInput = document.getElementById('media-input');
     const attachBtn = document.getElementById('attach-btn');
@@ -1438,7 +1661,7 @@ function attachEventListeners() {
                 saveData(); 
                 renderRooms();
                 renderMessages();
-                queueSync();
+                sbCreateMessage(db.activeRoom, textObj);
             }
         };
     }
@@ -1454,23 +1677,12 @@ if (document.readyState === 'loading') {
     initApp();
 }
 
-// Nuke Service Worker
-if ('serviceWorker' in navigator) { 
-    navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for(let registration of registrations) {
-            registration.unregister();
-        }
+// Register Service Worker for offline PWA support
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch((err) => {
+        console.warn('Service worker registration failed:', err);
     });
 }
-
-// Bind explicit pull and push buttons
-document.addEventListener('DOMContentLoaded', () => {
-    const pullBtn = document.getElementById('pull-btn');
-    const pushBtn = document.getElementById('push-btn');
-
-    if (pullBtn) pullBtn.addEventListener('click', explicitPull);
-    if (pushBtn) pushBtn.addEventListener('click', explicitPush);
-});
 
 document.addEventListener('click', (e) => {
     if (e.target.closest('#open-sync-modal-btn')) {

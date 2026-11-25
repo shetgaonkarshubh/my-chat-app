@@ -106,18 +106,37 @@
                 <option value="black-white">5. Velvet OLED (Black & White)</option>
             </select>
 
-            <label for="gh-token-input" style="margin-top: 8px;">GitHub Token (needs "repo" scope):</label>
-            <input type="password" id="gh-token-input" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off">
+            <label for="sb-url-input" style="margin-top: 8px;">Supabase Project URL:</label>
+            <input type="url" id="sb-url-input" placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" autocapitalize="none">
             
-            <label for="gh-repo-input">Storage Repository (owner/repo):</label>
-            <input type="text" id="gh-repo-input" placeholder="e.g. yourname/self-chat-data" autocomplete="off" autocapitalize="none">
+            <label for="sb-key-input">Supabase Anon Public Key:</label>
+            <input type="password" id="sb-key-input" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." autocomplete="off">
+
+            <div id="sb-auth-section" style="margin-top: 6px; display: flex; flex-direction: column; gap: 8px;">
+                <div id="sb-signed-out-box" style="display: flex; flex-direction: column; gap: 8px;">
+                    <label for="sb-email-input">Account Email:</label>
+                    <input type="email" id="sb-email-input" placeholder="you@example.com" autocomplete="email" autocapitalize="none">
+                    <label for="sb-password-input">Password:</label>
+                    <input type="password" id="sb-password-input" placeholder="••••••••" autocomplete="current-password">
+                    <div class="modal-actions">
+                        <button type="button" id="sb-signin-btn" style="background: #10b981; color: white;">Sign In</button>
+                        <button type="button" id="sb-signup-btn" style="background: #3b82f6; color: white;">Sign Up</button>
+                    </div>
+                </div>
+
+                <div id="sb-signed-in-box" class="hidden" style="display: flex; flex-direction: column; gap: 8px;">
+                    <p id="sb-user-info" style="font-size: 13px; font-weight: 600; color: #10b981;"></p>
+                    <div class="modal-actions">
+                        <button type="button" id="run-sync-btn">Sync Now 🔄</button>
+                        <button type="button" id="push-btn" style="background: #f59e0b; color: white;">📤 Push Local to Cloud</button>
+                        <button type="button" id="sb-signout-btn" style="background: #ef4444; color: white;">Sign Out</button>
+                    </div>
+                </div>
+            </div>
             
             <div class="modal-actions">
-                <button id="save-sync-btn">Save Settings</button>
-                <button id="pull-btn" style="background: #10b981; color: white;">📥 Pull from Cloud</button>
-                <button id="push-btn" style="background: #f59e0b; color: white;">📤 Push to Cloud</button>
-                <button id="run-sync-btn">Sync Now 🔄</button>
-                <button id="close-modal-btn">Close</button>
+                <button type="button" id="save-sync-btn">Save Settings</button>
+                <button type="button" id="close-modal-btn">Close</button>
             </div>
             <p id="sync-status"></p>
         </div>
@@ -126,6 +145,7 @@
     <div id="toast" class="toast hidden">Message copied</div>
 
     <script src="localforage.min.js"></script>
-    <script src="app.js?v=25"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js?v=26"></script>
 </body>
 </html>
