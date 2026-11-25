@@ -677,6 +677,22 @@ async function syncFromSupabase(isSilent = false) {
 
         await refreshSignedUrlsForMessages(allMsgs);
 
+        const remoteIsEmpty =
+            (foldersRes.data || []).length === 0 &&
+            (roomsRes.data || []).length === 0 &&
+            (msgsRes.data || []).length === 0 &&
+            (todosRes.data || []).length === 0;
+
+        const localHasData =
+            (db.folders && db.folders.length > 0) ||
+            (db.todos && db.todos.length > 0) ||
+            Object.keys(db.rooms || {}).some(r => r !== 'General Stuff' || (db.rooms[r] && db.rooms[r].length > 0));
+
+        if (remoteIsEmpty && localHasData) {
+            await pushLocalToCloud();
+            return;
+        }
+
         if (Object.keys(remoteRoomsObj).length === 0) {
             remoteRoomsObj['General Stuff'] = [];
         }
@@ -1592,6 +1608,43 @@ function attachEventListeners() {
 
     const pushBtn = document.getElementById('push-btn');
     if (pushBtn) pushBtn.onclick = pushLocalToCloud;
+
+    const importJsonBtn = document.getElementById('import-json-btn');
+    const importJsonInput = document.getElementById('import-json-input');
+    if (importJsonBtn && importJsonInput) {
+        importJsonBtn.onclick = () => importJsonInput.click();
+        importJsonInput.onchange = async () => {
+            const file = importJsonInput.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const parsed = JSON.parse(text);
+                if (!parsed || typeof parsed !== 'object' || !parsed.rooms) {
+                    throw new Error('Invalid db.json format.');
+                }
+                db = {
+                    rooms: parsed.rooms || { "General Stuff": [] },
+                    activeRoom: parsed.activeRoom || Object.keys(parsed.rooms || {})[0] || "General Stuff",
+                    deleted: [],
+                    folders: parsed.folders || [],
+                    deletedFolders: [],
+                    roomFolders: parsed.roomFolders || {},
+                    collapsedFolders: parsed.collapsedFolders || [],
+                    todos: parsed.todos || [],
+                    deletedTodos: []
+                };
+                saveData();
+                renderRooms();
+                renderMessages();
+                renderTodos();
+                await pushLocalToCloud();
+                showToast('Backup imported and synced!');
+            } catch (err) {
+                setSyncStatus('Import failed: ' + err.message);
+            }
+            importJsonInput.value = '';
+        };
+    }
 
     const mediaInput = document.getElementById('media-input');
     const attachBtn = document.getElementById('attach-btn');
